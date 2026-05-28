@@ -1,8 +1,14 @@
+# 依賴套件
 node_modules/
-build/
+
+# 編譯輸出的檔案
 dist/
-coverage/
+build/
+
+# 環境變數與機密資訊
+.env
+.env.local
+
+# 作業系統產生的垃圾檔
 .DS_Store
-*.log
-.env*
-!.env.example
+Thumbs.db

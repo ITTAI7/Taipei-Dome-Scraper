@@ -208,10 +208,13 @@ async function startServer() {
       return res.status(400).json({ error: 'Missing game url parameter.' });
     }
     
+    console.log(`[server] /api/get_tickets/${platform} 收到請求, url="${gameUrlStr}"`);
+    
     if (sessionToken && typeof sessionToken === 'string') {
         const u = new URL(gameUrlStr);
         u.searchParams.set('sessionToken', sessionToken);
         gameUrlStr = u.toString();
+        console.log(`[server] 已附加 sessionToken, 最終 url="${gameUrlStr}"`);
     }
     
     // Check if client expects SSE

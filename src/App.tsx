@@ -28,7 +28,7 @@ interface StaffRule {
 }
 
 export default function App() {
-  const [activeTeam, setActiveTeam] = useState<'brothers' | 'weichuan' | 'fubon' | 'tsg'>('brothers');
+  const [activeTeam, setActiveTeam] = useState<'brothers' | 'weichuan' | 'fubon' | 'tsg' | 'rakuten' | 'uni'>('brothers');
 
   const tabsRef = useRef<HTMLDivElement>(null);
   const progressEndRef = useRef<HTMLDivElement>(null);
@@ -53,7 +53,7 @@ export default function App() {
     }
   };
 
-  const [allGames, setAllGames] = useState<{ brothers: Game[], weichuan: Game[], fubon: Game[], tsg: Game[] }>({ brothers: [], weichuan: [], fubon: [], tsg: [] });
+  const [allGames, setAllGames] = useState<{ brothers: Game[], weichuan: Game[], fubon: Game[], tsg: Game[], rakuten: Game[], uni: Game[] }>({ brothers: [], weichuan: [], fubon: [], tsg: [], rakuten: [], uni: [] });
   const [selectedGame, setSelectedGame] = useState<string>('');
   const [loadingGames, setLoadingGames] = useState(true);
   
@@ -116,9 +116,11 @@ export default function App() {
       fetch('/api/get_games/brothers').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'brothers'}))).catch(() => []),
       fetch('/api/get_games/weichuan').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'weichuan'}))).catch(() => []),
       fetch('/api/get_games/fubon').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'fubon'}))).catch(() => []),
-      fetch('/api/get_games/tsg').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'tsg'}))).catch(() => [])
-    ]).then(([brothersGames, weichuanGames, fubonGames, tsgGames]) => {
-        setAllGames({ brothers: brothersGames, weichuan: weichuanGames, fubon: fubonGames, tsg: tsgGames });
+      fetch('/api/get_games/tsg').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'tsg'}))).catch(() => []),
+      fetch('/api/get_games/rakuten').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'rakuten'}))).catch(() => []),
+      fetch('/api/get_games/uni').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'uni'}))).catch(() => [])
+    ]).then(([brothersGames, weichuanGames, fubonGames, tsgGames, rakutenGames, uniGames]) => {
+        setAllGames({ brothers: brothersGames, weichuan: weichuanGames, fubon: fubonGames, tsg: tsgGames, rakuten: rakutenGames, uni: uniGames });
         if (brothersGames.length > 0) {
            setSelectedGame(brothersGames[0].link);
         }
@@ -357,7 +359,7 @@ export default function App() {
     <div className="min-h-screen bg-gray-50 flex justify-center text-gray-900 font-sans">
       <div className="w-full max-w-md bg-white min-h-screen shadow-xl overflow-hidden flex flex-col">
         {/* Header */}
-        <header className={`p-4 sticky top-0 z-10 flex items-center justify-center gap-2 transition-colors ${activeTeam === 'brothers' ? 'bg-yellow-400 border-b border-yellow-500' : activeTeam === 'weichuan' ? 'bg-red-600 outline-none border-b border-red-700' : activeTeam === 'tsg' ? 'bg-[#00604A] border-b border-[#004A3A]' : 'bg-[#004A9C] border-b border-[#003875]'}`}>
+        <header className={`p-4 sticky top-0 z-10 flex items-center justify-center gap-2 transition-colors ${activeTeam === 'brothers' ? 'bg-yellow-400 border-b border-yellow-500' : activeTeam === 'weichuan' ? 'bg-red-600 outline-none border-b border-red-700' : activeTeam === 'tsg' ? 'bg-[#00604A] border-b border-[#004A3A]' : activeTeam === 'rakuten' ? 'bg-[#BE1E2D] border-b border-[#9E1824]' : activeTeam === 'uni' ? 'bg-[#EC6A1A] border-b border-[#C55A16]' : 'bg-[#004A9C] border-b border-[#003875]'}`}>
           <Ticket className={`w-6 h-6 ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`} />
           <h1 className={`text-xl font-bold tracking-tight ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`}>大巨蛋售票極速查詢</h1>
         </header>
@@ -402,6 +404,18 @@ export default function App() {
               >
                  台鋼雄鷹
               </button>
+              <button
+                 className={`snap-start shrink-0 px-8 py-3 text-sm font-bold rounded-full transition-all border ${activeTeam === 'rakuten' ? 'bg-[#BE1E2D] text-white border-[#9E1824] shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                 onClick={() => { setActiveTeam('rakuten'); setTicketData(null); setError(''); }}
+              >
+                  樂天
+              </button>
+              <button
+                 className={`snap-start shrink-0 px-8 py-3 text-sm font-bold rounded-full transition-all border ${activeTeam === 'uni' ? 'bg-[#EC6A1A] text-white border-[#C55A16] shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                 onClick={() => { setActiveTeam('uni'); setTicketData(null); setError(''); }}
+              >
+                  統一獅
+              </button>
             </div>
             <button
               className="hidden md:flex absolute right-2 top-1/2 -translate-y-1/2 -mt-1 z-10 w-8 h-8 items-center justify-center bg-white/90 backdrop-blur-sm shadow border border-gray-200 rounded-full text-gray-500 hover:text-gray-900 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-0"
@@ -439,7 +453,7 @@ export default function App() {
                     <select 
                       value={selectedGame}
                       onChange={(e) => setSelectedGame(e.target.value)}
-                      className={`w-full bg-gray-50 border text-gray-900 rounded-xl p-4 appearance-none focus:outline-none focus:ring-2 font-semibold text-[15px] shadow-sm pr-10 ${activeTeam === 'brothers' ? 'border-gray-300 focus:ring-yellow-400 focus:border-yellow-400' : activeTeam === 'weichuan' ? 'border-gray-300 focus:ring-red-500 focus:border-red-500' : activeTeam === 'tsg' ? 'border-gray-300 focus:ring-[#00604A] focus:border-[#00604A]' : 'border-gray-300 focus:ring-[#004A9C] focus:border-[#004A9C]'}`}
+                      className={`w-full bg-gray-50 border text-gray-900 rounded-xl p-4 appearance-none focus:outline-none focus:ring-2 font-semibold text-[15px] shadow-sm pr-10 ${activeTeam === 'brothers' ? 'border-gray-300 focus:ring-yellow-400 focus:border-yellow-400' : activeTeam === 'weichuan' ? 'border-gray-300 focus:ring-red-500 focus:border-red-500' : activeTeam === 'tsg' ? 'border-gray-300 focus:ring-[#00604A] focus:border-[#00604A]' : activeTeam === 'rakuten' ? 'border-gray-300 focus:ring-[#BE1E2D] focus:border-[#BE1E2D]' : 'border-gray-300 focus:ring-[#004A9C] focus:border-[#004A9C]'}`}
                     >
                       {currentGamesForTeam.length === 0 ? (
                         <option disabled value="">無資料或尚未開賣</option>
