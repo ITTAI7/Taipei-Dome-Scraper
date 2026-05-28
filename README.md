@@ -2,19 +2,9 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# Run and deploy your AI Studio app
+# Taipei Dome Scraper (大巨蛋售票極速查詢系統)
+專門爬取各大售票網（目前支援 ibon 的樂天、統一獅）大巨蛋賽事剩餘票數的微服務。
 
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/0d728e8c-192c-4860-a3e8-2d6f36e284d2
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## 如何啟動伺服器
+1. 安裝依賴套件：`npm install`
+2. 開啟熱更新伺服器：`npx tsx --watch server.ts`
