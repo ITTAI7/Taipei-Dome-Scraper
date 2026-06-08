@@ -1,5 +1,6 @@
 # 大巨蛋售票極速查詢 (Taipei Dome Scraper)
 
+<<<<<<< HEAD
 中華職棒（CPBL）大巨蛋場次售票即時查詢工具，支援六隊售票系統的票務資料收集與分析。
 
 ## 支援球隊
@@ -128,3 +129,11 @@ start_all.bat
 ```env
 GEMINI_API_KEY="your_api_key"
 APP_URL="your_app_url"
+=======
+# Taipei Dome Scraper (大巨蛋售票極速查詢系統)
+專門爬取各大售票網（目前支援 ibon 的樂天、統一獅）大巨蛋賽事剩餘票數的微服務。
+
+## 如何啟動伺服器
+1. 安裝依賴套件：`npm install`
+2. 開啟熱更新伺服器：`npx tsx --watch server.ts`
+>>>>>>> 71551e6bf8f5f8887d3129548a3e39e3d719cdb2
