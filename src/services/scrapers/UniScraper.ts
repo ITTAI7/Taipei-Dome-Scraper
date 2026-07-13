@@ -2,11 +2,7 @@ import { ITicketScraper, GameLink, TicketInfo, TicketZone } from './ITicketScrap
 import * as cheerio from 'cheerio';
 import * as fs from 'fs';
 import * as path from 'path';
-
-async function getCloakBrowser() {
-  const cb = await import('cloakbrowser');
-  return cb;
-}
+import { launchIbonBrowser, warmupIbonBrowser, waitForCfBypass } from './IbonBrowser.js';
 
 type SeatMapEntry = [string, number, number];
 
@@ -37,7 +33,6 @@ export class UniScraper implements ITicketScraper {
     return map;
   }
 
-  /** 從票區名稱中提取樓層代號與區號，例如 "B1熱力搖滾席108區（GATE2、3入場）" → { floor: "B1", zoneNum: 108 } */
   private extractFloorZone(zoneName: string): { floor: string; zoneNum: number } | null {
     const floorMatch = zoneName.match(/(B1|L2|L4|L5)/i);
     const zoneMatch = zoneName.match(/(\d+)\s*區/);
@@ -45,55 +40,35 @@ export class UniScraper implements ITicketScraper {
     return { floor: floorMatch[1].toUpperCase(), zoneNum: parseInt(zoneMatch[1], 10) };
   }
 
-  /**
-   * 針對同實體分區（例如 B1-108）拆分為多筆資料的情境進行容量分配：
-   * 1. 先累積所有已有實測數據 (sold >= 0) 的 knownTotal
-   * 2. 將剩餘容量 (capacity - knownTotal) 分配給缺少實測數據 (sold === -1) 的票區
-   */
   private patchDomeCapacity(details: TicketZone[]): void {
-    // ── 第一階段：計算已知總和與分類 ──
     const blockMap = new Map<string, { knownTotal: number; missingIndices: number[] }>();
-
     details.forEach((d, index) => {
       const fz = this.extractFloorZone(d.zone);
       if (!fz) return;
       const key = `${fz.floor}-${fz.zoneNum}`;
-
       if (!blockMap.has(key)) blockMap.set(key, { knownTotal: 0, missingIndices: [] });
-
       const block = blockMap.get(key)!;
       if (d.sold !== undefined && d.sold >= 0) {
-        // 這區有實測數據，加入已知總和
         block.knownTotal += (d.unsold || 0) + d.sold;
       } else {
-        // 這區已售完或無圖，等待分配剩餘容量
         block.missingIndices.push(index);
       }
     });
-
-    // ── 第二階段：分配剩餘容量 ──
     for (const [key, block] of blockMap.entries()) {
       const capacity = this.domeSeatMap.get(key);
       if (capacity === undefined) continue;
-
-      // 如果有缺少實測數據的票區，才需要進行分配
       if (block.missingIndices.length > 0) {
-        // 計算剩下的容量
         const remainingCapacity = Math.max(0, capacity - block.knownTotal);
-
         block.missingIndices.forEach((detailIndex, i) => {
           const d = details[detailIndex];
           if (i === 0) {
-            // 第一個缺數據的區塊：接收所有剩餘容量
             d.sold = Math.max(0, remainingCapacity - (d.unsold || 0));
             d.total = remainingCapacity;
             if (d.error) d.error += ' (自動補齊同區剩餘總數)';
             else d.error = '(自動補齊同區剩餘總數)';
             console.log(`  [大巨蛋補齊] ${d.zone} -> 剩餘容量 ${remainingCapacity} 分配至此區`);
           } else {
-            // 後續缺數據的區塊：留空防重複
-            d.sold = -1;
-            d.total = -1;
+            d.sold = -1; d.total = -1;
             if (d.error) d.error += ' (容量已併入同區)';
             else d.error = '(容量已併入同區)';
             console.log(`  [大巨蛋補齊] ${d.zone} -> 容量已併入同區`);
@@ -103,59 +78,43 @@ export class UniScraper implements ITicketScraper {
     }
   }
 
-  // ─── getGames ──────────────────────────────────────────────────────────
-  async getGames(): Promise<GameLink[]> {
-    console.log('Fetching Uni-Lions games via CloakBrowser (API intercept)...');
-    const cb = await getCloakBrowser();
+  // ─── Browser helpers (Chrome profile 存在系統暫存區) ─────────
 
-    const browser = await cb.launch({ headless: true });
-    const context = await browser.newContext({
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    });
-    const page = await context.newPage();
+  // ─── getGames (瀏覽器模式 — ticket.ibon.com.tw 阻擋純 HTTP) ──
+  async getGames(): Promise<GameLink[]> {
+    console.log('Fetching Uni-Lions games via browser...');
+    const { context, page } = await launchIbonBrowser({ team: 'uni' });
+
+    await warmupIbonBrowser(page, 'https://ticket.ibon.com.tw/ActivityInfo/Details/39576');
 
     let apiResponse: string | null = null;
-
-    page.on('response', async (resp: any) => {
+    const responseHandler = async (resp: any) => {
       const url = resp.url();
       if (url.includes('/api/ActivityInfo/GetGameInfoList')) {
-        try {
-          apiResponse = await resp.text();
-          console.log('API response intercepted successfully');
-        } catch (e) {
-          console.log('Failed to read API response:', e);
-        }
+        try { apiResponse = await resp.text(); console.log('API response intercepted'); }
+        catch (e) {}
       }
-    });
+    };
+    page.on('response', responseHandler);
 
     try {
-      const url = 'https://ticket.ibon.com.tw/ActivityInfo/Details/39576';
-      console.log(`Navigating to ${url}...`);
+      await page.goto('https://ticket.ibon.com.tw/ActivityInfo/Details/39576', {
+        waitUntil: 'domcontentloaded', timeout: 60000
+      }).catch(() => {});
+      await new Promise(r => setTimeout(r, 5000));
 
-      await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
-      await new Promise((r) => setTimeout(r, 5000));
-
-      if (!apiResponse) {
-        console.log('Waiting for API response...');
-        await new Promise((r) => setTimeout(r, 5000));
-      }
-
+      if (!apiResponse) { console.log('Waiting for API...'); await new Promise(r => setTimeout(r, 5000)); }
       if (apiResponse) {
-        console.log('Parsing API response...');
         const games = this.parseGamesFromApi(apiResponse);
-        if (games.length > 0) {
-          console.log(`Found ${games.length} games from API.`);
-          return games;
-        }
+        if (games.length > 0) { console.log(`Found ${games.length} games.`); return games; }
       }
-
-      throw new Error('Could not fetch games from API: no response captured');
+      throw new Error('Could not fetch games');
     } catch (error) {
       console.error('Error fetching Uni-Lions games:', error);
       throw error;
     } finally {
-      await browser.close();
+      page.removeListener('response', responseHandler);
+      await context.close().catch(() => {});
     }
   }
 
@@ -175,70 +134,55 @@ export class UniScraper implements ITicketScraper {
         const fullUrl = ordersUrl || (href.startsWith('http') ? href : `${this.baseUrl}${href}`);
         games.push({ title: `${date} ${matchup} @ ${venue}`, link: fullUrl });
       }
-    } catch (e) {
-      console.error('Failed to parse API response:', e);
-    }
+    } catch (e) { console.error('Failed to parse API response:', e); }
     return games;
   }
 
-  // ─── getTickets ────────────────────────────────────────────────────────
+  // ─── getTickets ────────────────────────────────────────────────────
   async getTickets(gameUrlStr: string, onProgress?: (msg: string) => void): Promise<TicketInfo> {
     console.log(`Scraping Uni-Lions tickets for: ${gameUrlStr}`);
     const parsedUrl = new URL(gameUrlStr);
     const performanceId = parsedUrl.searchParams.get('PERFORMANCE_ID');
     const productId = parsedUrl.searchParams.get('PRODUCT_ID');
     if (!performanceId || !productId) throw new Error('Missing PERFORMANCE_ID or PRODUCT_ID in URL');
-
     if (onProgress) onProgress('正在嘗試 HTTP 方式讀取...');
-    try {
-      return await this.getTicketsViaHttp(performanceId, productId, onProgress);
-    } catch (httpError: any) {
+    try { return await this.getTicketsViaHttp(performanceId, productId, onProgress); }
+    catch (httpError: any) {
       console.log('HTTP approach failed:', httpError.message);
       if (onProgress) onProgress('HTTP 方式失敗，嘗試瀏覽器方式...');
       return this.getTicketsViaBrowser(performanceId, productId, onProgress);
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  //  HTTP approach (for reference – same as before, works for utiki)
-  // ═══════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════
+  //  HTTP approach
+  // ══════════════════════════════════════════════════════════════════
   private async getTicketsViaHttp(performanceId: string, productId: string, onProgress?: (msg: string) => void): Promise<TicketInfo> {
     const baseUrl = 'https://orders.ibon.com.tw/';
     const cookies = new Map<string, string>();
     let reqVer = '', auth = '';
     type Ret = { status: number; html: string };
-
     const fetchHtml = async (url: string, referer?: string, asAjax?: boolean): Promise<Ret> => {
       const opts: any = {
         headers: {
           Cookie: [...cookies.entries()].map(([k, v]) => `${k}=${v}`).join('; '),
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        },
-        redirect: 'manual',
+        }, redirect: 'manual',
       };
       if (referer) opts.headers['Referer'] = new URL(referer, baseUrl).href;
-      if (asAjax) {
-        opts.headers['X-Requested-With'] = 'XMLHttpRequest';
-        if (reqVer) opts.headers['RequestVerificationToken'] = reqVer;
-        if (auth) opts.headers['Authorization'] = auth;
-      }
+      if (asAjax) { opts.headers['X-Requested-With'] = 'XMLHttpRequest'; if (reqVer) opts.headers['RequestVerificationToken'] = reqVer; if (auth) opts.headers['Authorization'] = auth; }
       for (let retry = 0; retry < 3; retry++) {
         const res = await fetch(new URL(url, baseUrl).href, opts);
-        (res.headers.getSetCookie() || []).forEach((c: string) => {
-          const [k, v] = c.split(';')[0].split('=');
-          if (k && v !== undefined) cookies.set(k, v);
-        });
+        (res.headers.getSetCookie() || []).forEach((c: string) => { const [k, v] = c.split(';')[0].split('='); if (k && v !== undefined) cookies.set(k, v); });
         const html = await res.text();
         if (html.includes('網站有異常情況') || html.includes('驗證') || res.status === 403 || res.status === 503) {
           if (onProgress) onProgress(`系統攔截... 自動重試中 (${retry + 1}/3)...`);
-          await new Promise(r => setTimeout(r, 2000));
-          continue;
+          await new Promise(r => setTimeout(r, 2000)); continue;
         }
         return { status: res.status, html };
       }
       throw new Error('⚠️ 系統偵測到售票系統異常 (可能是IP限制、Session遺失或過於頻繁)');
     };
-
     if (onProgress) onProgress('正在初始化連線...');
     await fetchHtml('application/UTK02/UTK0201_000.aspx');
     if (onProgress) onProgress('正在進入訂票頁面...');
@@ -248,13 +192,11 @@ export class UniScraper implements ITicketScraper {
     if ($1('body').text().includes('驗證')) throw new Error('Cloudflare – fallback to browser');
     reqVer = $1('input[name="__RequestVerificationToken"]').attr('value') || '';
     auth = $1('input[name="__JWtToken"]').attr('value') || '';
-
     if (onProgress) onProgress('正在取得場次資訊...');
     const pRes = await fetchHtml('application/UTK02/UTK0201_000.aspx/PerformanceListControl', ordersUrl, true);
     let pid = performanceId;
     const m = pRes.html.match(/PERFORMANCE_ID=([A-Z0-9]+)/);
     if (m) pid = m[1];
-
     if (onProgress) onProgress('正在讀取各區資料...');
     const zUrl = `application/UTK02/UTK0204_000.aspx?PERFORMANCE_ID=${pid}&PRODUCT_ID=${productId}`;
     const r3 = await fetchHtml(zUrl, ordersUrl);
@@ -266,30 +208,22 @@ export class UniScraper implements ITicketScraper {
     const details: TicketZone[] = [];
     const hotZones: { idx: number; name: string; url: string }[] = [];
     let total_unsold = 0;
-
     $('table.table tbody tr').each((_, el) => {
       const name = $(el).find('td[data-title="票區"]').text().trim();
       const status = $(el).find('td[data-title="空位"] span').text().trim();
       const disabled = $(el).hasClass('disabled');
       if (!name) return;
-
       if (/^\d+$/.test(status)) { const u = parseInt(status); total_unsold += u; details.push({ zone: name, unsold: u, sold: -1, total: -1 }); return; }
       if (disabled || status === '已售完') { details.push({ zone: name, unsold: 0, sold: -1, total: -1, error: '已售完' }); return; }
       if (status === '熱賣中' || status === '') {
         const act = $(el).attr('onclick') || '';
         let parts: RegExpMatchArray | null = act.match(/['"]0205['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/);
-        if (!parts) {
-          const pid = act.match(/PERFORMANCE_ID=([^&'"]+)/i);
-          const gid = act.match(/GROUP_ID=([^&'"]+)/i);
-          const paid = act.match(/PERFORMANCE_PRICE_AREA_ID=([^&'"]+)/i);
-          if (pid && gid && paid) parts = ['', paid[1], pid[1], gid[1]] as any;
-        }
+        if (!parts) { const pid = act.match(/PERFORMANCE_ID=([^&'"]+)/i); const gid = act.match(/GROUP_ID=([^&'"]+)/i); const paid = act.match(/PERFORMANCE_PRICE_AREA_ID=([^&'"]+)/i); if (pid && gid && paid) parts = ['', paid[1], pid[1], gid[1]] as any; }
         if (parts) hotZones.push({ idx: details.length, name, url: `application/UTK02/UTK0205_000.aspx?PERFORMANCE_ID=${parts[2]}&GROUP_ID=${parts[3]}&PERFORMANCE_PRICE_AREA_ID=${parts[1]}` });
         details.push({ zone: name, unsold: 0, sold: -1, total: -1, error: name.includes('輪椅') ? '無座位圖連結' : undefined });
       } else details.push({ zone: name, unsold: 0, sold: -1, total: -1 });
     });
     if (!details.length) throw new Error('No zone data');
-
     if (hotZones.length && onProgress) onProgress(`正在讀取 ${hotZones.length} 個熱賣中分區...`);
     for (const tz of hotZones) {
       if (onProgress) onProgress(`讀取分區: ${tz.name}...`);
@@ -298,86 +232,57 @@ export class UniScraper implements ITicketScraper {
         try {
           const res = await fetch(new URL(tz.url, baseUrl).href, { headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': refererUrl } });
           const $s = cheerio.load(await res.text());
-          u = $s('.seat-icon-empyt').length;
-          s = $s('.seat-icon-sold').length;
-          break;
+          u = $s('.seat-icon-empyt').length; s = $s('.seat-icon-sold').length; break;
         } catch (e: any) { err = e.message; await new Promise(r => setTimeout(r, 2000)); }
       }
-      total_unsold += u;
-      details[tz.idx].unsold = u;
-      details[tz.idx].sold = s;
-      details[tz.idx].total = u + s;
+      total_unsold += u; details[tz.idx].unsold = u; details[tz.idx].sold = s; details[tz.idx].total = u + s;
       if (err && !u && !s) details[tz.idx].error = err;
       await new Promise(r => setTimeout(r, 800));
     }
-
-    // ── 合併同區塊大巨蛋座位數據 ──
     this.patchDomeCapacity(details);
-
     let sum_s = 0, sum_c = 0;
-    details.forEach(d => {
-      if (d.sold !== undefined && d.sold >= 0) { sum_s += d.sold; sum_c += (d.unsold || 0) + d.sold; }
-      else sum_c += d.unsold || 0;
-    });
+    details.forEach(d => { if (d.sold !== undefined && d.sold >= 0) { sum_s += d.sold; sum_c += (d.unsold || 0) + d.sold; } else sum_c += d.unsold || 0; });
     return { total_unsold, total_sold: sum_s, total_capacity: sum_c, details };
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  //  Browser approach (CloakBrowser + Playwright)
-  // ═══════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════
+  //  Browser approach
+  // ══════════════════════════════════════════════════════════════════
   private async getTicketsViaBrowser(performanceId: string, productId: string, onProgress?: (msg: string) => void): Promise<TicketInfo> {
-    const cb = await getCloakBrowser();
-    const browser = await cb.launch({ headless: true });
-    const page = await browser.newPage();
+    const { context, page } = await launchIbonBrowser({ team: 'uni' });
+    await warmupIbonBrowser(page);
     const ordersBase = 'https://orders.ibon.com.tw/';
-
     try {
       if (onProgress) onProgress('正在透過瀏覽器連線...');
-
-      // ── 1. UTK0201 + CF bypass ──────────────────────────────────────
       const utk0201Url = `${ordersBase}application/UTK02/UTK0201_000.aspx?PERFORMANCE_ID=${performanceId}&PRODUCT_ID=${productId}`;
       console.log(`Navigating to UTK0201: ${utk0201Url}`);
-      await page.goto(utk0201Url, { waitUntil: 'load', timeout: 120000 });
-
-      console.log('Waiting for Cloudflare bypass...');
       let cfPassed = false;
-      for (let i = 0; i < 60; i++) {
-        const t = await page.evaluate(() => document.title).catch(() => '');
-        const f = await page.evaluate(() => !!document.querySelector('#aspnetForm')).catch(() => false);
-        if (f || t === 'ibon售票系統') { cfPassed = true; console.log(`✅ CF passed! title="${t}"`); break; }
-        if (i % 4 === 0) console.log(`  ⏳ (${(i+1)*5+5}s)`);
+      for (let navRetry = 0; navRetry < 3 && !cfPassed; navRetry++) {
+        if (navRetry > 0) {
+          console.log(`  🔄 Retrying UTK0201 navigation (attempt ${navRetry + 1}/3)...`);
+          try { await page.goto('https://ticket.ibon.com.tw', { waitUntil: 'domcontentloaded', timeout: 45000 }); await new Promise(r => setTimeout(r, 4000)); }
+          catch (_) {}
+        }
+        await page.goto(utk0201Url, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {});
         await new Promise(r => setTimeout(r, 5000));
+
+        cfPassed = await waitForCfBypass(page, 180);
+        if (cfPassed) break;
+        console.log(`  ⚠️ CF wait exhausted for attempt ${navRetry + 1}`);
       }
       if (!cfPassed) throw new Error('CF challenge persisted');
 
-      // ── 1.5 從 DOM 中抓取當前頁面實際載入的場次名稱與時間 ─────────────
       const actualGameTitle = await page.evaluate(() => {
-        // 抓取活動時間
         const timeEl = document.querySelector('#ctl00_ContentPlaceHolder1_PERFORMANCE_TXT');
-        // 抓取活動名稱 (注意官方拼字為 NANE)
         const nameEl = document.querySelector('#ctl00_ContentPlaceHolder1_PERFORMANCE_NANE');
-        
         const time = timeEl ? timeEl.textContent?.trim() : '';
         const name = nameEl ? nameEl.textContent?.trim() : '';
-        
-        if (time || name) {
-          return `${time} | ${name}`;
-        }
+        if (time || name) { return `${time} | ${name}`; }
         return document.title || '(無法取得標題)';
       });
       console.log(`[統一獅爬蟲] 瀏覽器當前實際載入的場次為: ${actualGameTitle}`);
 
-      // ── 2. Extract zone data from page (multiple strategies) ─────────
-      let zoneData: Array<{
-        PERFORMANCE_PRICE_AREA_ID: string;
-        GROUP_ID: string;
-        NAME: string;
-        PRICE: number;
-        AMOUNT: string;
-        BACKGROUND_COLOR?: string;
-      }> = [];
-
-      // Strategy A: Try page.evaluate to grab window.jsonData directly
+      let zoneData: Array<{ PERFORMANCE_PRICE_AREA_ID: string; GROUP_ID: string; NAME: string; PRICE: number; AMOUNT: string; BACKGROUND_COLOR?: string; }> = [];
       try {
         const jsZoneData = await page.evaluate(() => {
           const w = window as any;
@@ -386,194 +291,115 @@ export class UniScraper implements ITicketScraper {
           if (w.areaData && Array.isArray(w.areaData)) return JSON.stringify(w.areaData);
           return null;
         });
-        if (jsZoneData) {
-          zoneData = JSON.parse(jsZoneData);
-          console.log(`Found ${zoneData.length} zones via window.jsonData eval`);
-        }
+        if (jsZoneData) { zoneData = JSON.parse(jsZoneData); console.log(`Found ${zoneData.length} zones via window.jsonData eval`); }
       } catch (e: any) { console.log('page.evaluate jsonData failed:', e.message); }
 
-      // Strategy B: Try extracting from HTML source with multiple regex patterns
       if (!zoneData.length) {
         const html = await page.content();
-
         const patterns = [
-          /const\s+jsonData\s*=\s*'(.*?)(?<!\\)'\s*;/s,
-          /var\s+jsonData\s*=\s*'(.*?)(?<!\\)'\s*;/s,
-          /window\.jsonData\s*=\s*'(.*?)(?<!\\)'\s*;/s,
-          /jsonData\s*=\s*'(.*?)(?<!\\)'\s*;/s,
-          /const\s+jsonData\s*=\s*"(.*?)(?<!\\)"\s*;/s,
-          /var\s+jsonData\s*=\s*"(.*?)(?<!\\)"\s*;/s,
-          /jsonData\s*=\s*JSON\.parse\('(.*?)'\)/s,
-          /jsonData\s*=\s*(\[[\s\S]*?\])\s*;/s,
+          /const\s+jsonData\s*=\s*'(.*?)(?<!\\)'\s*;/s, /var\s+jsonData\s*=\s*'(.*?)(?<!\\)'\s*;/s,
+          /window\.jsonData\s*=\s*'(.*?)(?<!\\)'\s*;/s, /jsonData\s*=\s*'(.*?)(?<!\\)'\s*;/s,
+          /const\s+jsonData\s*=\s*"(.*?)(?<!\\)"\s*;/s, /var\s+jsonData\s*=\s*"(.*?)(?<!\\)"\s*;/s,
+          /jsonData\s*=\s*JSON\.parse\('(.*?)'\)/s, /jsonData\s*=\s*(\[[\s\S]*?\])\s*;/s,
           /\[\s*\{[^}]*PERFORMANCE_PRICE_AREA_ID[^}]*\}[\s\S]*?\][\s]*;?/,
         ];
-
         let matched = false;
         for (const pattern of patterns) {
           const jsonMatch = html.match(pattern);
           if (jsonMatch && jsonMatch[0]) {
             let candidate = '';
-            if (pattern.source.includes('PERFORMANCE_PRICE_AREA_ID')) {
-              candidate = jsonMatch[0].replace(/;\s*$/, '').trim();
-            } else if (jsonMatch[1]) {
-              candidate = jsonMatch[1];
-            }
-
+            if (pattern.source.includes('PERFORMANCE_PRICE_AREA_ID')) { candidate = jsonMatch[0].replace(/;\s*$/, '').trim(); }
+            else if (jsonMatch[1]) { candidate = jsonMatch[1]; }
             if (candidate) {
               try {
                 const cleaned = candidate.replace(/\\'/g, "'").replace(/\\"/g, '"');
                 const parsed = JSON.parse(cleaned);
                 if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].PERFORMANCE_PRICE_AREA_ID) {
-                  zoneData = parsed;
-                  console.log(`Found ${zoneData.length} zones via regex pattern (${pattern.source.substring(0, 50)}...)`);
-                  matched = true;
-                  break;
+                  zoneData = parsed; console.log(`Found ${zoneData.length} zones via regex pattern`); matched = true; break;
                 }
               } catch (_) {}
             }
           }
         }
-
         if (!matched) {
           const scriptMatch = html.match(/<script[^>]*>([\s\S]*?(?:jsonData|zoneData|areaData)[\s\S]*?)<\/script>/i);
           if (scriptMatch) {
-            console.log('Found script tag containing jsonData/zoneData, attempting extraction...');
-            const scriptContent = scriptMatch[1];
-            const arrayMatch = scriptContent.match(/(?:jsonData|zoneData|areaData)\s*=\s*(\[[\s\S]*?\])\s*;?/);
+            const arrayMatch = scriptMatch[1].match(/(?:jsonData|zoneData|areaData)\s*=\s*(\[[\s\S]*?\])\s*;?/);
             if (arrayMatch && arrayMatch[1]) {
-              try {
-                zoneData = JSON.parse(arrayMatch[1]);
-                console.log(`Found ${zoneData.length} zones via script tag extraction`);
-                matched = true;
-              } catch (_) {}
+              try { zoneData = JSON.parse(arrayMatch[1]); console.log(`Found ${zoneData.length} zones via script tag extraction`); matched = true; }
+              catch (_) {}
             }
           }
         }
-
         if (!matched) {
-          const idx = html.indexOf('jsonData');
-          if (idx >= 0) {
-            console.log('found "jsonData" at position', idx, 'surrounding:', html.substring(Math.max(0, idx - 80), idx + 300));
-          } else {
-            console.log('"jsonData" not found in HTML. Body text:', (await page.evaluate(() => document.body?.innerText || '')).substring(0, 500));
-          }
-
-          // ── Fallback to DOM table parsing ──
           console.log('jsonData extraction failed, falling back to DOM table parsing...');
           return await this.parseZoneTableFromBrowser(page, utk0201Url, performanceId, productId, ordersBase, onProgress);
         }
       }
 
       console.log(`Processing ${zoneData.length} zones from extracted data`);
-
-      // ── 3. Process each zone ────────────────────────────────────────
       const details: TicketZone[] = [];
       let total_unsold = 0;
-
       for (const z of zoneData) {
         const zoneName = z.NAME;
         const status = z.AMOUNT;
         const isDisabled = z.BACKGROUND_COLOR === 'disabled' || status === '已售完';
         const areaId = z.PERFORMANCE_PRICE_AREA_ID;
         const groupIds = z.GROUP_ID.split(' ').map(g => g.replace(/^a/, ''));
-
-        if (isDisabled) {
-          details.push({ zone: zoneName, unsold: 0, sold: -1, total: -1, error: '已售完' });
-          continue;
-        }
-
+        if (isDisabled) { details.push({ zone: zoneName, unsold: 0, sold: -1, total: -1, error: '已售完' }); continue; }
         const isNumeric = /^\d+$/.test(status);
         const needsSeatMap = isNumeric || status === '熱賣中';
-
         if (needsSeatMap) {
           const tableUnsold = isNumeric ? parseInt(status) : 0;
-
-          if (zoneName.includes('輪椅')) {
-            details.push({ zone: zoneName, unsold: tableUnsold, sold: -1, total: -1, error: '無座位圖' });
-            continue;
-          }
-
+          if (zoneName.includes('輪椅')) { details.push({ zone: zoneName, unsold: tableUnsold, sold: -1, total: -1, error: '無座位圖' }); continue; }
           if (onProgress) onProgress(`讀取分區: ${zoneName}...`);
           console.log(`\n🖱️ Fetching seat map for "${zoneName}" (status="${status}")...`);
           let u = 0, s = 0, err: string | undefined;
-
           const gid = groupIds[0];
           const seatUrl = `${ordersBase}application/UTK02/UTK0205_.aspx?PERFORMANCE_ID=${performanceId}&GROUP_ID=${gid}&PERFORMANCE_PRICE_AREA_ID=${areaId}`;
           try {
             console.log(`  Navigating to UTK0205: GROUP_ID=${gid}`);
-            await page.goto(seatUrl, { waitUntil: 'load', timeout: 60000 });
+            await page.goto(seatUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
             await new Promise(r => setTimeout(r, 3000));
-
             for (let w = 0; w < 30; w++) {
               const q = await page.evaluate(() => (document.body?.innerText || '').includes('購票人數眾多')).catch(() => false);
-              if (!q) break;
-              if (w % 5 === 0) console.log(`    ⏳ Queue (${w*2}s)...`);
+              if (!q) break; if (w % 5 === 0) console.log(`    ⏳ Queue (${w*2}s)...`);
               await new Promise(r => setTimeout(r, 2000));
             }
-
             const sr = await page.evaluate(() => ({
               unsold: document.querySelectorAll('.seat-icon-empyt, .seat-empty').length,
               sold: document.querySelectorAll('.seat-icon-sold, .seat-people').length,
             })).catch(() => ({ unsold: 0, sold: 0 }));
-
-            u = sr.unsold || tableUnsold;
-            s = sr.sold;
+            u = sr.unsold || tableUnsold; s = sr.sold;
             console.log(`    🪑 ${zoneName}: empty=${u} sold=${s}`);
-          } catch (e: any) {
-            err = e.message;
-            u = tableUnsold;
-            console.log(`    ⚠️ ${e.message}`);
-          }
-
+          } catch (e: any) { err = e.message; u = tableUnsold; console.log(`    ⚠️ ${e.message}`); }
           total_unsold += u;
-          await page.goto(utk0201Url, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
+          await page.goto(utk0201Url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
           await new Promise(r => setTimeout(r, 2000));
-
           details.push({ zone: zoneName, unsold: u, sold: s, total: u + s, error: err && !u && !s ? err : undefined });
           continue;
         }
         details.push({ zone: zoneName, unsold: 0, sold: -1, total: -1 });
       }
-
-      // ── 合併同區塊大巨蛋座位數據 ──
       this.patchDomeCapacity(details);
-
-      // ── 4. Compute totals ──────────────────────────────────────────
       let sum_s = 0, sum_c = 0;
-      details.forEach(d => {
-        if (d.sold !== undefined && d.sold >= 0) { sum_s += d.sold; sum_c += (d.unsold || 0) + d.sold; }
-        else sum_c += d.unsold || 0;
-      });
+      details.forEach(d => { if (d.sold !== undefined && d.sold >= 0) { sum_s += d.sold; sum_c += (d.unsold || 0) + d.sold; } else sum_c += d.unsold || 0; });
       console.log(`\n✅ Complete! ${details.length} zones, unsold=${total_unsold} sold=${sum_s}`);
       return { total_unsold, total_sold: sum_s, total_capacity: sum_c, details };
-
     } catch (error) {
       console.error('Browser scraping failed:', error);
       throw error;
-    } finally {
-      await browser.close();
-      console.log('🟢 Browser closed');
-    }
+    } finally { await context.close(); console.log('🟢 Browser closed'); }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  //  DOM-based table parsing fallback (when jsonData is not available)
-  // ═══════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════
+  //  DOM-based table parsing fallback
+  // ══════════════════════════════════════════════════════════════════
   private async parseZoneTableFromBrowser(page: any, utk0201Url: string, performanceId: string, productId: string, ordersBase: string, onProgress?: (msg: string) => void): Promise<TicketInfo> {
     console.log('Parsing zone table directly from browser DOM...');
-
     if (onProgress) onProgress('正在透過 DOM 解析票區表格...');
-
-    // Extract zone rows from the page's table
     const rows = await page.evaluate(() => {
-      const results: Array<{
-        name: string;
-        status: string;
-        disabled: boolean;
-        onclick: string;
-      }> = [];
-
-      // Try multiple table selectors
+      const results: Array<{ name: string; status: string; disabled: boolean; onclick: string; }> = [];
       const tables = document.querySelectorAll('table.table, table[class*="table"], table');
       for (const table of tables) {
         const trs = table.querySelectorAll('tbody tr, tr');
@@ -583,111 +409,56 @@ export class UniScraper implements ITicketScraper {
           const name = (nameEl?.textContent || '').trim();
           const status = (statusEl?.textContent || '').trim();
           if (!name) continue;
-          const disabled = tr.classList.contains('disabled');
-          const onclick = tr.getAttribute('onclick') || '';
-          results.push({ name, status, disabled, onclick });
+          results.push({ name, status, disabled: tr.classList.contains('disabled'), onclick: tr.getAttribute('onclick') || '' });
         }
         if (results.length > 0) break;
       }
       return results;
     });
-
     console.log(`Found ${rows.length} zone rows from DOM`);
-
     if (!rows.length) throw new Error('No zone rows found in browser DOM table');
-
     const details: TicketZone[] = [];
     let total_unsold = 0;
     const seatMapTasks: Array<{ idx: number; areaId: string; groupId: string }> = [];
-
     for (const row of rows) {
-      const name = row.name;
-      const status = row.status;
-      const disabled = row.disabled;
-
-      if (/^\d+$/.test(status)) {
-        const u = parseInt(status);
-        total_unsold += u;
-        details.push({ zone: name, unsold: u, sold: -1, total: -1 });
-        continue;
-      }
-
-      if (disabled || status === '已售完') {
-        details.push({ zone: name, unsold: 0, sold: -1, total: -1, error: '已售完' });
-        continue;
-      }
-
+      const { name, status, disabled } = row;
+      if (/^\d+$/.test(status)) { const u = parseInt(status); total_unsold += u; details.push({ zone: name, unsold: u, sold: -1, total: -1 }); continue; }
+      if (disabled || status === '已售完') { details.push({ zone: name, unsold: 0, sold: -1, total: -1, error: '已售完' }); continue; }
       if (status === '熱賣中' || status === '') {
         const act = row.onclick;
-        const pid = act.match(/PERFORMANCE_ID=([^&'"]+)/i);
-        const gid = act.match(/GROUP_ID=([^&'"]+)/i);
-        const paid = act.match(/PERFORMANCE_PRICE_AREA_ID=([^&'"]+)/i);
-
-        if (pid && gid && paid && !name.includes('輪椅')) {
-          seatMapTasks.push({ idx: details.length, areaId: paid[1], groupId: gid[1] });
-          details.push({ zone: name, unsold: 0, sold: -1, total: -1 });
-        } else {
-          details.push({ zone: name, unsold: 0, sold: -1, total: -1, error: name.includes('輪椅') ? '無座位圖連結' : undefined });
-        }
+        const pid = act.match(/PERFORMANCE_ID=([^&'"]+)/i); const gid = act.match(/GROUP_ID=([^&'"]+)/i); const paid = act.match(/PERFORMANCE_PRICE_AREA_ID=([^&'"]+)/i);
+        if (pid && gid && paid && !name.includes('輪椅')) { seatMapTasks.push({ idx: details.length, areaId: paid[1], groupId: gid[1] }); details.push({ zone: name, unsold: 0, sold: -1, total: -1 }); }
+        else { details.push({ zone: name, unsold: 0, sold: -1, total: -1, error: name.includes('輪椅') ? '無座位圖連結' : undefined }); }
         continue;
       }
-
       details.push({ zone: name, unsold: 0, sold: -1, total: -1 });
     }
-
-    // Process hot zones via UTK0205 seat map
     if (seatMapTasks.length && onProgress) onProgress(`正在讀取 ${seatMapTasks.length} 個熱賣中分區...`);
     for (const task of seatMapTasks) {
       if (onProgress) onProgress(`讀取分區: ${details[task.idx].zone}...`);
       console.log(`\n🖱️ [DOM] Fetching seat map for "${details[task.idx].zone}"`);
-
       const seatUrl = `${ordersBase}application/UTK02/UTK0205_.aspx?PERFORMANCE_ID=${performanceId}&GROUP_ID=${task.groupId}&PERFORMANCE_PRICE_AREA_ID=${task.areaId}`;
       let u = 0, s = 0, err: string | undefined;
-
       try {
         console.log(`  Navigating to UTK0205: GROUP_ID=${task.groupId}`);
-        await page.goto(seatUrl, { waitUntil: 'load', timeout: 60000 });
+        await page.goto(seatUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await new Promise(r => setTimeout(r, 3000));
-
         for (let w = 0; w < 30; w++) {
           const q = await page.evaluate(() => (document.body?.innerText || '').includes('購票人數眾多')).catch(() => false);
-          if (!q) break;
-          if (w % 5 === 0) console.log(`    ⏳ Queue (${w*2}s)...`);
+          if (!q) break; if (w % 5 === 0) console.log(`    ⏳ Queue (${w*2}s)...`);
           await new Promise(r => setTimeout(r, 2000));
         }
-
-        const sr = await page.evaluate(() => ({
-          unsold: document.querySelectorAll('.seat-icon-empyt, .seat-empty').length,
-          sold: document.querySelectorAll('.seat-icon-sold, .seat-people').length,
-        })).catch(() => ({ unsold: 0, sold: 0 }));
-
-        u = sr.unsold;
-        s = sr.sold;
-        console.log(`    🪑 ${details[task.idx].zone}: empty=${u} sold=${s}`);
-      } catch (e: any) {
-        err = e.message;
-        console.log(`    ⚠️ ${e.message}`);
-      }
-
-      total_unsold += u;
-      details[task.idx].unsold = u;
-      details[task.idx].sold = s;
-      details[task.idx].total = u + s;
+        const sr = await page.evaluate(() => ({ unsold: document.querySelectorAll('.seat-icon-empyt, .seat-empty').length, sold: document.querySelectorAll('.seat-icon-sold, .seat-people').length, })).catch(() => ({ unsold: 0, sold: 0 }));
+        u = sr.unsold; s = sr.sold; console.log(`    🪑 ${details[task.idx].zone}: empty=${u} sold=${s}`);
+      } catch (e: any) { err = e.message; console.log(`    ⚠️ ${e.message}`); }
+      total_unsold += u; details[task.idx].unsold = u; details[task.idx].sold = s; details[task.idx].total = u + s;
       if (err && !u && !s) details[task.idx].error = err;
-
-      // Return to UTK0201
-      await page.goto(utk0201Url, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
+      await page.goto(utk0201Url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
       await new Promise(r => setTimeout(r, 2000));
     }
-
-    // ── 合併同區塊大巨蛋座位數據 ──
     this.patchDomeCapacity(details);
-
     let sum_s = 0, sum_c = 0;
-    details.forEach(d => {
-      if (d.sold !== undefined && d.sold >= 0) { sum_s += d.sold; sum_c += (d.unsold || 0) + d.sold; }
-      else sum_c += d.unsold || 0;
-    });
+    details.forEach(d => { if (d.sold !== undefined && d.sold >= 0) { sum_s += d.sold; sum_c += (d.unsold || 0) + d.sold; } else sum_c += d.unsold || 0; });
     console.log(`\n✅ [DOM] Complete! ${details.length} zones, unsold=${total_unsold} sold=${sum_s}`);
     return { total_unsold, total_sold: sum_s, total_capacity: sum_c, details };
   }

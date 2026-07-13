@@ -5,6 +5,7 @@ import { FubonScraper } from './FubonScraper.js';
 import { TsgScraper } from './TsgScraper.js';
 import { RakutenScraper } from './RakutenScraper.js';
 import { UniScraper } from './UniScraper.js';
+import { AllStarScraper } from './AllStarScraper.js';
 
 export class ScraperFactory {
   static getScraper(platform: string): ITicketScraper {
@@ -25,6 +26,8 @@ export class ScraperFactory {
       case 'uni':
       case 'unilions':
         return new UniScraper();
+      case 'allstar':
+        return new AllStarScraper();
       // Add more platforms like tixcraft, kktix below as needed
       default:
         throw new Error(`Platform ${platform} is not supported yet.`);

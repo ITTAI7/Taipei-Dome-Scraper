@@ -12,3 +12,22 @@ build/
 # 作業系統產生的垃圾檔
 .DS_Store
 Thumbs.db
+
+# Playwright 瀏覽器 profile（含 cookie/cache，體積大且含個人 session）
+browser_data/
+browser_data_allstar/
+browser_data_rakuten/
+browser_data_uni/
+
+# 除錯用截圖
+s*_clicked.png
+cf_fail_debug.png
+cf_fail_end.png
+cf_final_fail.png
+rakuten_cf_fail.png
+rakuten_challenge_fail.png
+rakuten_error.png
+
+# 手動編譯產物（專案用 tsx 直接跑 .ts，不需要 .js）
+src/services/scrapers/*.js
+server.js

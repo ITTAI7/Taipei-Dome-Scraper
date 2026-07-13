@@ -16,7 +16,6 @@
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "cheerio": "^1.2.0",
-    "cloakbrowser": "^0.3.30",
     "dotenv": "^17.2.3",
     "express": "^4.22.1",
     "iconv-lite": "^0.7.2",

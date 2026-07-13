@@ -28,7 +28,7 @@ interface StaffRule {
 }
 
 export default function App() {
-  const [activeTeam, setActiveTeam] = useState<'brothers' | 'weichuan' | 'fubon' | 'tsg' | 'rakuten' | 'uni'>('brothers');
+  const [activeTeam, setActiveTeam] = useState<'brothers' | 'weichuan' | 'fubon' | 'tsg' | 'rakuten' | 'uni' | 'allstar'>('brothers');
 
   const tabsRef = useRef<HTMLDivElement>(null);
   const progressEndRef = useRef<HTMLDivElement>(null);
@@ -53,7 +53,7 @@ export default function App() {
     }
   };
 
-  const [allGames, setAllGames] = useState<{ brothers: Game[], weichuan: Game[], fubon: Game[], tsg: Game[], rakuten: Game[], uni: Game[] }>({ brothers: [], weichuan: [], fubon: [], tsg: [], rakuten: [], uni: [] });
+  const [allGames, setAllGames] = useState<{ brothers: Game[], weichuan: Game[], fubon: Game[], tsg: Game[], rakuten: Game[], uni: Game[], allstar: Game[] }>({ brothers: [], weichuan: [], fubon: [], tsg: [], rakuten: [], uni: [], allstar: [] });
   const [selectedGame, setSelectedGame] = useState<string>('');
   const [loadingGames, setLoadingGames] = useState(true);
   
@@ -118,9 +118,10 @@ export default function App() {
       fetch('/api/get_games/fubon').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'fubon'}))).catch(() => []),
       fetch('/api/get_games/tsg').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'tsg'}))).catch(() => []),
       fetch('/api/get_games/rakuten').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'rakuten'}))).catch(() => []),
-      fetch('/api/get_games/uni').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'uni'}))).catch(() => [])
-    ]).then(([brothersGames, weichuanGames, fubonGames, tsgGames, rakutenGames, uniGames]) => {
-        setAllGames({ brothers: brothersGames, weichuan: weichuanGames, fubon: fubonGames, tsg: tsgGames, rakuten: rakutenGames, uni: uniGames });
+      fetch('/api/get_games/uni').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'uni'}))).catch(() => []),
+      fetch('/api/get_games/allstar').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'allstar'}))).catch(() => [])
+    ]).then(([brothersGames, weichuanGames, fubonGames, tsgGames, rakutenGames, uniGames, allstarGames]) => {
+        setAllGames({ brothers: brothersGames, weichuan: weichuanGames, fubon: fubonGames, tsg: tsgGames, rakuten: rakutenGames, uni: uniGames, allstar: allstarGames });
         if (brothersGames.length > 0) {
            setSelectedGame(brothersGames[0].link);
         }
@@ -359,7 +360,7 @@ export default function App() {
     <div className="min-h-screen bg-gray-50 flex justify-center text-gray-900 font-sans">
       <div className="w-full max-w-md bg-white min-h-screen shadow-xl overflow-hidden flex flex-col">
         {/* Header */}
-        <header className={`p-4 sticky top-0 z-10 flex items-center justify-center gap-2 transition-colors ${activeTeam === 'brothers' ? 'bg-yellow-400 border-b border-yellow-500' : activeTeam === 'weichuan' ? 'bg-red-600 outline-none border-b border-red-700' : activeTeam === 'tsg' ? 'bg-[#00604A] border-b border-[#004A3A]' : activeTeam === 'rakuten' ? 'bg-[#BE1E2D] border-b border-[#9E1824]' : activeTeam === 'uni' ? 'bg-[#EC6A1A] border-b border-[#C55A16]' : 'bg-[#004A9C] border-b border-[#003875]'}`}>
+        <header className={`p-4 sticky top-0 z-10 flex items-center justify-center gap-2 transition-colors ${activeTeam === 'brothers' ? 'bg-yellow-400 border-b border-yellow-500' : activeTeam === 'weichuan' ? 'bg-red-600 outline-none border-b border-red-700' : activeTeam === 'tsg' ? 'bg-[#00604A] border-b border-[#004A3A]' : activeTeam === 'rakuten' ? 'bg-[#BE1E2D] border-b border-[#9E1824]' : activeTeam === 'uni' ? 'bg-[#EC6A1A] border-b border-[#C55A16]' : activeTeam === 'allstar' ? 'bg-[#D4AF37] border-b border-[#B8960F]' : 'bg-[#004A9C] border-b border-[#003875]'}`}>
           <Ticket className={`w-6 h-6 ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`} />
           <h1 className={`text-xl font-bold tracking-tight ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`}>大巨蛋售票極速查詢</h1>
         </header>
@@ -415,6 +416,12 @@ export default function App() {
                  onClick={() => { setActiveTeam('uni'); setTicketData(null); setError(''); }}
               >
                   統一獅
+              </button>
+              <button
+                 className={`snap-start shrink-0 px-8 py-3 text-sm font-bold rounded-full transition-all border ${activeTeam === 'allstar' ? 'bg-[#D4AF37] text-white border-[#B8960F] shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                 onClick={() => { setActiveTeam('allstar'); setTicketData(null); setError(''); }}
+              >
+                  職棒明星賽
               </button>
             </div>
             <button
