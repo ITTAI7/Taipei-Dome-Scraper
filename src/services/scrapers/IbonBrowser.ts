@@ -14,6 +14,31 @@ import * as path from 'path';
 import * as os from 'os';
 import { chromium } from 'playwright-core';
 import type { BrowserContext, Page } from 'playwright-core';
+import type { GameLink } from './ITicketScraper.js';
+
+// ─── 雲端環境偵測 ─────────────────────────────────────────────
+// CLOUD_MODE 由伺服器執行環境變數控制（AI Studio 部署時設為 true）。
+// 雲端容器沒有本機 Chrome、也沒有人可以手動點擊 Cloudflare 驗證，
+// 所以直接拒絕啟動瀏覽器，回傳清楚的錯誤而非讓 findChromePath() 拋出難懂的訊息。
+export function isCloudMode(): boolean {
+  return process.env.CLOUD_MODE === 'true';
+}
+
+// ─── 場次清單快取 ─────────────────────────────────────────────
+// getGames() 在每次網頁載入時都會被呼叫；用短 TTL 快取避免每次重新整理
+// 都重新啟動瀏覽器（進而跳出可見視窗）。
+const GAMES_CACHE_TTL_MS = 10 * 60 * 1000;
+const gamesCache = new Map<string, { games: GameLink[]; expiresAt: number }>();
+
+export function getCachedGames(team: string): GameLink[] | null {
+  const entry = gamesCache.get(team);
+  if (!entry || Date.now() > entry.expiresAt) return null;
+  return entry.games;
+}
+
+export function setCachedGames(team: string, games: GameLink[]): void {
+  gamesCache.set(team, { games, expiresAt: Date.now() + GAMES_CACHE_TTL_MS });
+}
 
 // ─── Chrome 路徑偵測 ──────────────────────────────────────────
 function findChromePath(): string {
@@ -74,6 +99,12 @@ export interface IbonBrowserOptions {
    */
   team?: string;
   userDataDir?: string;
+  /**
+   * 是否以無視窗模式啟動（預設 false，維持原本行為）。
+   * 已有效 CF cookie 時，headless: true 可避免不必要跳出視窗；
+   * 遇到驗證頁時應改用 headless: false 讓使用者手動點擊。
+   */
+  headless?: boolean;
 }
 
 export interface IbonBrowserInstance {
@@ -94,14 +125,19 @@ export interface IbonBrowserInstance {
  *                           可傳入自訂路徑（保留向下相容）
  */
 export async function launchIbonBrowser(opts: IbonBrowserOptions = {}): Promise<IbonBrowserInstance> {
+  if (isCloudMode()) {
+    throw new Error('CLOUD_UNSUPPORTED_IBON: 雲端環境不支援 ibon 瀏覽器繞過機制，請使用本機版查詢');
+  }
+
   const profileDir = opts.userDataDir ||
     (opts.team ? path.join(os.tmpdir(), '.ibon-browser-data', opts.team) : defaultUserDataDir());
-  console.log(`🚀 啟動本機 Chrome: ${CHROME_PATH}`);
+  const headless = opts.headless ?? false;
+  console.log(`🚀 啟動本機 Chrome (${headless ? 'headless' : '有視窗'}): ${CHROME_PATH}`);
   console.log(`   設定檔目錄: ${profileDir}`);
 
   const context = await chromium.launchPersistentContext(profileDir, {
     executablePath: CHROME_PATH,
-    headless: false,
+    headless,
     args: SHARED_ARGS,
     viewport: { width: 1280, height: 900 },
   });
@@ -146,6 +182,56 @@ export async function warmupIbonBrowser(page: Page, activityPage?: string): Prom
       await sleep(2000);
     } catch (_) {}
   }
+}
+
+/**
+ * 快速單次檢查目前頁面是否卡在 CF / ibon 的「請稍候／驗證您是否是人類」頁。
+ * 不等待、不重試，供 headless 嘗試後的一次性判斷用。
+ */
+export async function isCfChallengePage(page: Page): Promise<boolean> {
+  return await page.evaluate(() => {
+    const body = document.body?.innerText || '';
+    const title = document.title || '';
+    return (
+      body.includes('Just a moment') ||
+      body.includes('Checking your browser') ||
+      body.includes('請稍候') ||
+      body.includes('DDoS') ||
+      body.includes('驗證您是否是人類') ||
+      body.includes('正在檢查您的瀏覽器') ||
+      body.includes('cf-browser-verification') ||
+      title.includes('Just a moment') ||
+      title.includes('請稍候')
+    );
+  }).catch(() => true); // 無法判斷時保守視為仍在攔截頁
+}
+
+/**
+ * 等待驗證頁消失（不要求特定頁面的強特徵，適用於場次清單等
+ * 非訂票頁面的場景）。用於 headless 嘗試失敗、切換有視窗模式後，
+ * 等待使用者手動完成驗證。
+ */
+export async function waitForCfClear(page: Page, timeoutSec = 180): Promise<boolean> {
+  const start = Date.now();
+  const deadline = start + timeoutSec * 1000;
+  console.log(`   ⏳ 等待驗證通過（請在瀏覽器視窗中完成驗證，最多 ${timeoutSec}s）...`);
+  let lastPromptSec = -10;
+
+  while (Date.now() < deadline) {
+    const blocked = await isCfChallengePage(page);
+    if (!blocked) {
+      console.log(`   ✅ 驗證頁已消失，繼續執行`);
+      return true;
+    }
+    const elapsed = Math.round((Date.now() - start) / 1000);
+    if (elapsed - lastPromptSec >= 15) {
+      console.log(`   ⏳ 請在瀏覽器視窗中完成驗證 (${elapsed}s)...`);
+      lastPromptSec = elapsed;
+    }
+    await sleep(3000);
+  }
+  console.log(`   ❌ 等待驗證逾時 (${timeoutSec}s)`);
+  return false;
 }
 
 /**

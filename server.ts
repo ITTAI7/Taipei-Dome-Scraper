@@ -176,6 +176,11 @@ async function startServer() {
     }
   });
 
+  // API Route: Runtime config for the frontend (e.g. cloud deployment flags)
+  app.get('/api/config', (req, res) => {
+    res.json({ cloudMode: process.env.CLOUD_MODE === 'true' });
+  });
+
   // API Route: Get Games for a specific platform
   app.get('/api/get_games/:platform', async (req, res) => {
     let maxRetries = 3;
@@ -188,9 +193,13 @@ async function startServer() {
         return res.json({ games: gameLinks });
       } catch (error) {
         attempt++;
-        if (attempt >= maxRetries || !String(error).includes('售票系統異常')) {
+        const errStr = String(error);
+        if (errStr.includes('CLOUD_UNSUPPORTED_IBON')) {
+          return res.status(503).json({ error: '雲端版暫不支援此球隊查詢，請使用本機版' });
+        }
+        if (attempt >= maxRetries || !errStr.includes('售票系統異常')) {
           console.error('Error fetching games:', error);
-          return res.status(500).json({ error: String(error) });
+          return res.status(500).json({ error: errStr });
         }
         console.log(`Retrying get_games for ${req.params.platform}... (attempt ${attempt + 1})`);
         await new Promise(r => setTimeout(r, 2000));
@@ -265,13 +274,16 @@ async function startServer() {
                 }
         
                 console.error('Error fetching tickets:', error);
-                
+
                 let errResponse = errStr;
                 if (errStr.includes("UNAUTHORIZED")) {
                     errResponse = 'Session expired or not logged in';
                 }
                 if (errStr.includes("PERFORMANCE_ID")) {
                     errResponse = 'Could not fetch tickets from the ticketing system (Blocked by WAF/Cloudflare or structure changed).';
+                }
+                if (errStr.includes("CLOUD_UNSUPPORTED_IBON")) {
+                    errResponse = '雲端版暫不支援此球隊查詢，請使用本機版';
                 }
                 sendEvent('error', { error: errResponse, code: errStr.includes("UNAUTHORIZED") ? 401 : 500 });
                 res.end();
@@ -307,6 +319,9 @@ async function startServer() {
         }
         if (errStr.includes("PERFORMANCE_ID")) {
             return res.status(502).json({ error: 'Could not fetch tickets from the ticketing system (Blocked by WAF/Cloudflare or structure changed).' });
+        }
+        if (errStr.includes("CLOUD_UNSUPPORTED_IBON")) {
+            return res.status(503).json({ error: '雲端版暫不支援此球隊查詢，請使用本機版' });
         }
         return res.status(500).json({ error: errStr });
       }

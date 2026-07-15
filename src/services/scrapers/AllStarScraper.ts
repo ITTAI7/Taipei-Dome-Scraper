@@ -2,7 +2,7 @@ import { ITicketScraper, GameLink, TicketInfo, TicketZone } from './ITicketScrap
 import * as cheerio from 'cheerio';
 import * as fs from 'fs';
 import * as path from 'path';
-import { launchIbonBrowser, warmupIbonBrowser, waitForCfBypass } from './IbonBrowser.js';
+import { launchIbonBrowser, warmupIbonBrowser, waitForCfBypass, isCfChallengePage, waitForCfClear, getCachedGames, setCachedGames } from './IbonBrowser.js';
 
 type SeatMapEntry = [string, number, number];
 
@@ -74,10 +74,13 @@ export class AllStarScraper implements ITicketScraper {
 
   // ─── getGames (瀏覽器模式 — ticket.ibon.com.tw 阻擋純 HTTP) ──
   async getGames(): Promise<GameLink[]> {
-    console.log('Fetching All-Star Game games via browser...');
-    const { context, page } = await launchIbonBrowser({ userDataDir: this.userDataDir });
+    const cached = getCachedGames('allstar');
+    if (cached) { console.log('使用快取的職棒明星賽場次清單'); return cached; }
 
-    await warmupIbonBrowser(page, 'https://ticket.ibon.com.tw/ActivityInfo/Details/39701');
+    const ACTIVITY_URL = 'https://ticket.ibon.com.tw/ActivityInfo/Details/39701';
+    console.log('Fetching All-Star Game games via browser...');
+    let headless = true;
+    let { context, page } = await launchIbonBrowser({ userDataDir: this.userDataDir, headless });
 
     let apiResponse: string | null = null;
     const responseHandler = async (resp: any) => {
@@ -89,15 +92,31 @@ export class AllStarScraper implements ITicketScraper {
     page.on('response', responseHandler);
 
     try {
-      await page.goto('https://ticket.ibon.com.tw/ActivityInfo/Details/39701', {
-        waitUntil: 'domcontentloaded', timeout: 60000
-      }).catch(() => {});
+      await warmupIbonBrowser(page, ACTIVITY_URL);
+      await page.goto(ACTIVITY_URL, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
       await new Promise(r => setTimeout(r, 5000));
+
+      if (!apiResponse && await isCfChallengePage(page)) {
+        console.log('⚠️ Headless 模式遭遇驗證頁，改用有視窗模式讓使用者手動驗證...');
+        page.removeListener('response', responseHandler);
+        await context.close().catch(() => {});
+        headless = false;
+        ({ context, page } = await launchIbonBrowser({ userDataDir: this.userDataDir, headless }));
+        page.on('response', responseHandler);
+        await warmupIbonBrowser(page, ACTIVITY_URL);
+        await page.goto(ACTIVITY_URL, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+        await waitForCfClear(page, 180);
+        await new Promise(r => setTimeout(r, 5000));
+      }
 
       if (!apiResponse) { console.log('Waiting for API...'); await new Promise(r => setTimeout(r, 5000)); }
       if (apiResponse) {
         const games = this.parseGamesFromApi(apiResponse);
-        if (games.length > 0) { console.log(`Found ${games.length} games.`); return games; }
+        if (games.length > 0) {
+          console.log(`Found ${games.length} games.`);
+          setCachedGames('allstar', games);
+          return games;
+        }
       }
       throw new Error('Could not fetch games');
     } catch (error) {

@@ -27,8 +27,13 @@ interface StaffRule {
   count: number;
 }
 
+const IBON_TEAMS = ['rakuten', 'uni', 'allstar'] as const;
+const IBON_DISABLED_MESSAGE = '雲端版暫不支援，請洽規劃課分機8699';
+
 export default function App() {
   const [activeTeam, setActiveTeam] = useState<'brothers' | 'weichuan' | 'fubon' | 'tsg' | 'rakuten' | 'uni' | 'allstar'>('brothers');
+  const [cloudMode, setCloudMode] = useState(false);
+  const isIbonDisabled = (team: string) => cloudMode && (IBON_TEAMS as readonly string[]).includes(team);
 
   const tabsRef = useRef<HTMLDivElement>(null);
   const progressEndRef = useRef<HTMLDivElement>(null);
@@ -112,21 +117,35 @@ export default function App() {
   };
 
   useEffect(() => {
-    Promise.all([
-      fetch('/api/get_games/brothers').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'brothers'}))).catch(() => []),
-      fetch('/api/get_games/weichuan').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'weichuan'}))).catch(() => []),
-      fetch('/api/get_games/fubon').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'fubon'}))).catch(() => []),
-      fetch('/api/get_games/tsg').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'tsg'}))).catch(() => []),
-      fetch('/api/get_games/rakuten').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'rakuten'}))).catch(() => []),
-      fetch('/api/get_games/uni').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'uni'}))).catch(() => []),
-      fetch('/api/get_games/allstar').then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform: 'allstar'}))).catch(() => [])
-    ]).then(([brothersGames, weichuanGames, fubonGames, tsgGames, rakutenGames, uniGames, allstarGames]) => {
-        setAllGames({ brothers: brothersGames, weichuan: weichuanGames, fubon: fubonGames, tsg: tsgGames, rakuten: rakutenGames, uni: uniGames, allstar: allstarGames });
-        if (brothersGames.length > 0) {
-           setSelectedGame(brothersGames[0].link);
-        }
-        setLoadingGames(false);
-    });
+    const init = async () => {
+      let cloud = false;
+      try {
+        const cfgRes = await fetch('/api/config');
+        const cfg = await cfgRes.json();
+        cloud = !!cfg.cloudMode;
+      } catch {}
+      setCloudMode(cloud);
+
+      const fetchGames = (platform: string) => cloud && (IBON_TEAMS as readonly string[]).includes(platform)
+        ? Promise.resolve([])
+        : fetch(`/api/get_games/${platform}`).then(res => res.json()).then(d => (d.games || []).map((g: Game) => ({...g, platform}))).catch(() => []);
+
+      const [brothersGames, weichuanGames, fubonGames, tsgGames, rakutenGames, uniGames, allstarGames] = await Promise.all([
+        fetchGames('brothers'),
+        fetchGames('weichuan'),
+        fetchGames('fubon'),
+        fetchGames('tsg'),
+        fetchGames('rakuten'),
+        fetchGames('uni'),
+        fetchGames('allstar')
+      ]);
+      setAllGames({ brothers: brothersGames, weichuan: weichuanGames, fubon: fubonGames, tsg: tsgGames, rakuten: rakutenGames, uni: uniGames, allstar: allstarGames });
+      if (brothersGames.length > 0) {
+         setSelectedGame(brothersGames[0].link);
+      }
+      setLoadingGames(false);
+    };
+    init();
   }, []);
 
   useEffect(() => {
@@ -406,20 +425,26 @@ export default function App() {
                  台鋼雄鷹
               </button>
               <button
-                 className={`snap-start shrink-0 px-8 py-3 text-sm font-bold rounded-full transition-all border ${activeTeam === 'rakuten' ? 'bg-[#BE1E2D] text-white border-[#9E1824] shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
-                 onClick={() => { setActiveTeam('rakuten'); setTicketData(null); setError(''); }}
+                 className={`snap-start shrink-0 px-8 py-3 text-sm font-bold rounded-full transition-all border ${isIbonDisabled('rakuten') ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60' : activeTeam === 'rakuten' ? 'bg-[#BE1E2D] text-white border-[#9E1824] shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                 onClick={() => { if (isIbonDisabled('rakuten')) return; setActiveTeam('rakuten'); setTicketData(null); setError(''); }}
+                 disabled={isIbonDisabled('rakuten')}
+                 title={isIbonDisabled('rakuten') ? IBON_DISABLED_MESSAGE : undefined}
               >
                   樂天
               </button>
               <button
-                 className={`snap-start shrink-0 px-8 py-3 text-sm font-bold rounded-full transition-all border ${activeTeam === 'uni' ? 'bg-[#EC6A1A] text-white border-[#C55A16] shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
-                 onClick={() => { setActiveTeam('uni'); setTicketData(null); setError(''); }}
+                 className={`snap-start shrink-0 px-8 py-3 text-sm font-bold rounded-full transition-all border ${isIbonDisabled('uni') ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60' : activeTeam === 'uni' ? 'bg-[#EC6A1A] text-white border-[#C55A16] shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                 onClick={() => { if (isIbonDisabled('uni')) return; setActiveTeam('uni'); setTicketData(null); setError(''); }}
+                 disabled={isIbonDisabled('uni')}
+                 title={isIbonDisabled('uni') ? IBON_DISABLED_MESSAGE : undefined}
               >
                   統一獅
               </button>
               <button
-                 className={`snap-start shrink-0 px-8 py-3 text-sm font-bold rounded-full transition-all border ${activeTeam === 'allstar' ? 'bg-[#D4AF37] text-white border-[#B8960F] shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
-                 onClick={() => { setActiveTeam('allstar'); setTicketData(null); setError(''); }}
+                 className={`snap-start shrink-0 px-8 py-3 text-sm font-bold rounded-full transition-all border ${isIbonDisabled('allstar') ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60' : activeTeam === 'allstar' ? 'bg-[#D4AF37] text-white border-[#B8960F] shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                 onClick={() => { if (isIbonDisabled('allstar')) return; setActiveTeam('allstar'); setTicketData(null); setError(''); }}
+                 disabled={isIbonDisabled('allstar')}
+                 title={isIbonDisabled('allstar') ? IBON_DISABLED_MESSAGE : undefined}
               >
                   職棒明星賽
               </button>
