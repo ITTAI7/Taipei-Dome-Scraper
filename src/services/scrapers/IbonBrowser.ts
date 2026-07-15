@@ -40,6 +40,23 @@ export function setCachedGames(team: string, games: GameLink[]): void {
   gamesCache.set(team, { games, expiresAt: Date.now() + GAMES_CACHE_TTL_MS });
 }
 
+// ─── 併發請求去重 ─────────────────────────────────────────────
+// React StrictMode（開發模式）與使用者重新整理都可能讓同一個 team 的
+// getGames() 幾乎同時被呼叫兩次。兩個 launchPersistentContext 搶同一個
+// profile 目錄必定有一個會炸掉，所以進行中的請求要共用同一個 Promise。
+const inFlightGames = new Map<string, Promise<GameLink[]>>();
+
+export function dedupeGamesFetch(team: string, factory: () => Promise<GameLink[]>): Promise<GameLink[]> {
+  const existing = inFlightGames.get(team);
+  if (existing) {
+    console.log(`已有進行中的 ${team} 場次請求，共用結果而不重複啟動瀏覽器`);
+    return existing;
+  }
+  const p = factory().finally(() => { inFlightGames.delete(team); });
+  inFlightGames.set(team, p);
+  return p;
+}
+
 // ─── Chrome 路徑偵測 ──────────────────────────────────────────
 function findChromePath(): string {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
