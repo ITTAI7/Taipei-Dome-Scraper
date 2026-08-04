@@ -265,7 +265,8 @@ export default function App() {
     });
 
     eventSource.addEventListener('error', (e: any) => {
-      let errStr = 'API 發生錯誤，可能因為環境限制或目標網站阻擋';
+      const genericReasons = 'API 發生錯誤，可能原因如下：\n• 環境限制（IP 或雲端環境被限制）\n• 目標網站阻擋（WAF / Cloudflare 防護）\n• 售票網站結構異動';
+      let errStr = genericReasons;
       try {
         if (e.data) {
           const data = JSON.parse(e.data);
@@ -275,11 +276,11 @@ export default function App() {
              fetchCaptcha();
              errStr = '登入狀態已過期，請重新登入';
           } else if (data.error) {
-             errStr += `\n詳情: ${data.error}`;
+             errStr = `${data.error}\n\n${genericReasons}`;
           }
         }
       } catch (err) {}
-      
+
       setError(errStr);
       setLoadingTickets(false);
       setScrapingProgress([]);
@@ -543,7 +544,7 @@ export default function App() {
 
           {/* Error Message */}
           {error && (
-            <div className="p-4 bg-red-50 border-l-4 border-red-500 text-red-700 rounded-lg text-sm font-medium">
+            <div className="p-4 bg-red-50 border-l-4 border-red-500 text-red-700 rounded-lg text-sm font-medium whitespace-pre-line">
                {error}
             </div>
           )}

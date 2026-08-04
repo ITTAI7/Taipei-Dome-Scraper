@@ -147,6 +147,13 @@ export class BrothersScraper implements ITicketScraper {
     }
     let mPerf = pListHtml.match(/PERFORMANCE_ID=([A-Z0-9]+)/);
     if(!mPerf) {
+        // No purchase link yet usually means the game hasn't gone on sale
+        // (e.g. season-ticket priority window not open), not a WAF block.
+        const $pList = cheerio.load(pListHtml);
+        const buyBtnText = $pList('#buy_btn').text().trim();
+        if (buyBtnText) {
+            throw new Error(`⏳ 此場次尚未開賣：${buyBtnText}`);
+        }
         console.error("pListHtml preview:", pListHtml.substring(0, 1000));
         throw new Error("Could not find PERFORMANCE_ID on performance list API");
     }
