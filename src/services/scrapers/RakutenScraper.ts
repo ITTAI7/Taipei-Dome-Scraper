@@ -2,7 +2,7 @@ import { ITicketScraper, GameLink, TicketInfo, TicketZone } from './ITicketScrap
 import * as cheerio from 'cheerio';
 import * as fs from 'fs';
 import * as path from 'path';
-import { launchIbonBrowser, warmupIbonBrowser, waitForCfBypass, isCfChallengePage, waitForCfClear, getCachedGames, setCachedGames, dedupeGamesFetch } from './IbonBrowser.js';
+import { launchIbonBrowser, warmupIbonBrowser, waitForCfBypass, isCfChallengePage, waitForCfClear, getCachedGames, setCachedGames, dedupeGamesFetch, acquireSharedGamesContext, releaseSharedGamesContext } from './IbonBrowser.js';
 
 type SeatMapEntry = [string, number, number];
 
@@ -41,40 +41,46 @@ export class RakutenScraper implements ITicketScraper {
   }
 
   private patchDomeCapacity(details: TicketZone[]): void {
-    const blockMap = new Map<string, { knownTotal: number; missingIndices: number[] }>();
+    const blockMap = new Map<string, { knownTotal: number; hasRealData: boolean; missingIndices: number[] }>();
     details.forEach((d, index) => {
+      if (d.zone.includes('輪椅')) return; // 輪椅席獨立列出，不併入同區容量統計，也不自動補齊
       const fz = this.extractFloorZone(d.zone);
       if (!fz) return;
       const key = `${fz.floor}-${fz.zoneNum}`;
-      if (!blockMap.has(key)) blockMap.set(key, { knownTotal: 0, missingIndices: [] });
+      if (!blockMap.has(key)) blockMap.set(key, { knownTotal: 0, hasRealData: false, missingIndices: [] });
       const block = blockMap.get(key)!;
       if (d.sold !== undefined && d.sold >= 0) {
         block.knownTotal += (d.unsold || 0) + d.sold;
+        block.hasRealData = true; // 這一列是真的從座位圖抓到的資料，不是靠容量表推算出來的
       } else {
         block.missingIndices.push(index);
       }
     });
     for (const [key, block] of blockMap.entries()) {
+      if (block.missingIndices.length === 0) continue;
+      // 只有「同區已知全部售完」或「同區其他列（例如前排/後排）已抓到真實座位圖資料」時，
+      // 才用容量表回推剩餘數字；單純抓取失敗、同區完全沒有任何真實資料可比對時，
+      // 不要用容量去猜，避免用假數字掩蓋抓取失敗（該區應該維持未知，等待重試或顯示錯誤）。
+      const allMissingAreSoldOut = block.missingIndices.every(idx => details[idx].error === '已售完');
+      if (!block.hasRealData && !allMissingAreSoldOut) continue;
       const capacity = this.domeSeatMap.get(key);
       if (capacity === undefined) continue;
-      if (block.missingIndices.length > 0) {
-        const remainingCapacity = Math.max(0, capacity - block.knownTotal);
-        block.missingIndices.forEach((detailIndex, i) => {
-          const d = details[detailIndex];
-          if (i === 0) {
-            d.sold = Math.max(0, remainingCapacity - (d.unsold || 0));
-            d.total = remainingCapacity;
-            if (d.error) d.error += ' (自動補齊同區剩餘總數)';
-            else d.error = '(自動補齊同區剩餘總數)';
-            console.log(`  [大巨蛋補齊] ${d.zone} -> 剩餘容量 ${remainingCapacity} 分配至此區`);
-          } else {
-            d.sold = -1; d.total = -1;
-            if (d.error) d.error += ' (容量已併入同區)';
-            else d.error = '(容量已併入同區)';
-            console.log(`  [大巨蛋補齊] ${d.zone} -> 容量已併入同區`);
-          }
-        });
-      }
+      const remainingCapacity = Math.max(0, capacity - block.knownTotal);
+      block.missingIndices.forEach((detailIndex, i) => {
+        const d = details[detailIndex];
+        if (i === 0) {
+          d.sold = Math.max(0, remainingCapacity - (d.unsold || 0));
+          d.total = remainingCapacity;
+          if (d.error) d.error += ' (自動補齊同區剩餘總數)';
+          else d.error = '(自動補齊同區剩餘總數)';
+          console.log(`  [大巨蛋補齊] ${d.zone} -> 剩餘容量 ${remainingCapacity} 分配至此區`);
+        } else {
+          d.sold = -1; d.total = -1;
+          if (d.error) d.error += ' (容量已併入同區)';
+          else d.error = '(容量已併入同區)';
+          console.log(`  [大巨蛋補齊] ${d.zone} -> 容量已併入同區`);
+        }
+      });
     }
   }
 
@@ -91,9 +97,10 @@ export class RakutenScraper implements ITicketScraper {
   private async fetchGamesUncached(): Promise<GameLink[]> {
     const ACTIVITY_URL = 'https://ticket.ibon.com.tw/ActivityInfo/Details/39689';
 
-    const attempt = async (headless: boolean): Promise<GameLink[]> => {
-      console.log(`Fetching Rakuten games via browser (headless=${headless})...`);
-      const { context, page } = await launchIbonBrowser({ team: 'rakuten', headless });
+    console.log('Fetching Rakuten games via shared ibon browser...');
+    const context = await acquireSharedGamesContext();
+    try {
+      const page = await context.newPage();
       let apiResponse: string | null = null;
       const responseHandler = async (resp: any) => {
         if (resp.url().includes('/api/ActivityInfo/GetGameInfoList')) {
@@ -104,13 +111,11 @@ export class RakutenScraper implements ITicketScraper {
       page.on('response', responseHandler);
 
       try {
-        await warmupIbonBrowser(page, ACTIVITY_URL);
         await page.goto(ACTIVITY_URL, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
         await new Promise(r => setTimeout(r, 5000));
 
-        if (headless) {
-          if (!apiResponse && await isCfChallengePage(page)) throw new Error('Headless 模式遭遇驗證頁');
-        } else {
+        // 共用 context 通常已經過 CF；萬一這個活動頁仍被擋（例如剛換 IP），再等一次驗證通過
+        if (!apiResponse && await isCfChallengePage(page)) {
           await waitForCfClear(page, 180);
         }
 
@@ -119,33 +124,17 @@ export class RakutenScraper implements ITicketScraper {
 
         const games = this.parseGamesFromApi(apiResponse);
         if (!games.length) throw new Error('Could not fetch games (empty list)');
+
+        console.log(`Found ${games.length} games.`);
+        setCachedGames('rakuten', games);
         return games;
       } finally {
         page.removeListener('response', responseHandler);
-        await context.close().catch(() => {});
+        await page.close().catch(() => {});
       }
-    };
-
-    let games: GameLink[] | undefined;
-    let lastError: any;
-    try {
-      games = await attempt(true);
-    } catch (error: any) {
-      console.log(`⚠️ Headless 嘗試失敗 (${error.message})，改用有視窗模式讓使用者手動驗證...`);
-      for (let retry = 0; retry < 2 && !games; retry++) {
-        try { games = await attempt(false); }
-        catch (error2: any) {
-          lastError = error2;
-          console.log(`⚠️ 有視窗模式第 ${retry + 1} 次嘗試失敗 (${error2.message})`);
-          if (retry === 0) await new Promise(r => setTimeout(r, 4000));
-        }
-      }
-      if (!games) throw lastError;
+    } finally {
+      releaseSharedGamesContext();
     }
-
-    console.log(`Found ${games.length} games.`);
-    setCachedGames('rakuten', games);
-    return games;
   }
 
   private parseGamesFromApi(jsonStr: string): GameLink[] {
@@ -249,7 +238,7 @@ export class RakutenScraper implements ITicketScraper {
         const act = $(el).attr('onclick') || '';
         let parts: RegExpMatchArray | null = act.match(/['"]0205['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/);
         if (!parts) { const pid = act.match(/PERFORMANCE_ID=([^&'"]+)/i); const gid = act.match(/GROUP_ID=([^&'"]+)/i); const paid = act.match(/PERFORMANCE_PRICE_AREA_ID=([^&'"]+)/i); if (pid && gid && paid) parts = ['', paid[1], pid[1], gid[1]] as any; }
-        if (parts) hotZones.push({ idx: details.length, name, url: `application/UTK02/UTK0205_000.aspx?PERFORMANCE_ID=${parts[2]}&GROUP_ID=${parts[3]}&PERFORMANCE_PRICE_AREA_ID=${parts[1]}` });
+        if (parts && !name.includes('輪椅')) hotZones.push({ idx: details.length, name, url: `application/UTK02/UTK0205_000.aspx?PERFORMANCE_ID=${parts[2]}&GROUP_ID=${parts[3]}&PERFORMANCE_PRICE_AREA_ID=${parts[1]}` });
         details.push({ zone: name, unsold: 0, sold: -1, total: -1, error: name.includes('輪椅') ? '無座位圖連結' : undefined });
       } else details.push({ zone: name, unsold: 0, sold: -1, total: -1 });
     });
@@ -258,21 +247,79 @@ export class RakutenScraper implements ITicketScraper {
     for (const tz of hotZones) {
       if (onProgress) onProgress(`讀取分區: ${tz.name}...`);
       let u = 0, s = 0, err: string | undefined;
+      let ok = false;
       for (let r = 0; r < 3; r++) {
         try {
           const res = await fetch(new URL(tz.url, baseUrl).href, { headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': refererUrl } });
           const $s = cheerio.load(await res.text());
-          u = $s('.seat-icon-empyt').length; s = $s('.seat-icon-sold').length; break;
+          u = $s('.seat-icon-empyt').length; s = $s('.seat-icon-sold').length;
+          if (u === 0 && s === 0) {
+            // 「熱賣中」的分區理論上不該完全沒有座位資料，0/0 通常代表頁面內容異常，重試而非採信
+            err = '座位圖讀取為空（可能尚未渲染完成）';
+            console.log(`  ⚠️ ${tz.name}: 讀到 0/0，準備重試...`);
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+          ok = true; break;
         } catch (e: any) { err = e.message; await new Promise(r => setTimeout(r, 2000)); }
       }
-      total_unsold += u; details[tz.idx].unsold = u; details[tz.idx].sold = s; details[tz.idx].total = u + s;
-      if (err && !u && !s) details[tz.idx].error = err;
+      if (ok) {
+        total_unsold += u; details[tz.idx].unsold = u; details[tz.idx].sold = s; details[tz.idx].total = u + s;
+      } else {
+        // 重試多次仍讀不到資料：維持未知，不要用假的 0/0 掩蓋抓取失敗
+        details[tz.idx].sold = -1; details[tz.idx].total = -1; details[tz.idx].error = err;
+      }
       await new Promise(r => setTimeout(r, 800));
     }
     this.patchDomeCapacity(details);
     let sum_s = 0, sum_c = 0;
-    details.forEach(d => { if (d.sold !== undefined && d.sold >= 0) { sum_s += d.sold; sum_c += (d.unsold || 0) + d.sold; } else sum_c += d.unsold || 0; });
+    details.forEach(d => {
+      if (d.zone.includes('輪椅')) return; // 輪椅席不計入總計
+      if (d.sold !== undefined && d.sold >= 0) { sum_s += d.sold; sum_c += (d.unsold || 0) + d.sold; } else sum_c += d.unsold || 0;
+    });
     return { total_unsold, total_sold: sum_s, total_capacity: sum_c, details };
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  座位圖讀取（含重試）— 讀到 0/0 時視為尚未渲染完成/讀取失敗，
+  //  重新導航重試，絕不把失敗當成「這區賣完/沒人」寫入假資料。
+  // ══════════════════════════════════════════════════════════════════
+  private async fetchSeatCountsBrowser(page: any, seatUrl: string, zoneName: string): Promise<{ u: number; s: number; err?: string }> {
+    let lastErr: string | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        console.log(`  Navigating to UTK0205 (attempt ${attempt + 1}/3): ${seatUrl}`);
+        await page.goto(seatUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await new Promise(r => setTimeout(r, 3000));
+        for (let w = 0; w < 30; w++) {
+          const q = await page.evaluate(() => (document.body?.innerText || '').includes('購票人數眾多')).catch(() => false);
+          if (!q) break; if (w % 5 === 0) console.log(`    ⏳ Queue (${w * 2}s)...`);
+          await new Promise(r => setTimeout(r, 2000));
+        }
+        // 座位圖是前端渲染出來的，網路較慢時 domcontentloaded 之後座位格子可能還沒畫出來，
+        // 在放棄之前多輪詢幾次，避免把「還沒畫完」誤判為「這區沒人/賣完」。
+        let sr = { unsold: 0, sold: 0 };
+        for (let w = 0; w < 8; w++) {
+          sr = await page.evaluate(() => ({
+            unsold: document.querySelectorAll('.seat-icon-empyt, .seat-empty').length,
+            sold: document.querySelectorAll('.seat-icon-sold, .seat-people').length,
+          })).catch(() => ({ unsold: 0, sold: 0 }));
+          if (sr.unsold > 0 || sr.sold > 0) break;
+          await new Promise(r => setTimeout(r, 1500));
+        }
+        if (sr.unsold === 0 && sr.sold === 0) {
+          lastErr = '座位圖讀取為空（可能尚未渲染完成）';
+          console.log(`    ⚠️ ${zoneName}: 讀到 0/0，判定為讀取失敗，準備重試...`);
+          continue;
+        }
+        console.log(`    🪑 ${zoneName}: empty=${sr.unsold} sold=${sr.sold}`);
+        return { u: sr.unsold, s: sr.sold };
+      } catch (e: any) {
+        lastErr = e.message;
+        console.log(`    ⚠️ ${zoneName} 第 ${attempt + 1} 次讀取失敗: ${e.message}`);
+      }
+    }
+    return { u: -1, s: -1, err: lastErr || '座位圖讀取失敗' };
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -386,36 +433,30 @@ export class RakutenScraper implements ITicketScraper {
           if (zoneName.includes('輪椅')) { details.push({ zone: zoneName, unsold: tableUnsold, sold: -1, total: -1, error: '無座位圖' }); continue; }
           if (onProgress) onProgress(`讀取分區: ${zoneName}...`);
           console.log(`\n🖱️ Fetching seat map for "${zoneName}" (status="${status}")...`);
-          let u = 0, s = 0, err: string | undefined;
           const gid = groupIds[0];
           const seatUrl = `${ordersBase}application/UTK02/UTK0205_.aspx?PERFORMANCE_ID=${performanceId}&GROUP_ID=${gid}&PERFORMANCE_PRICE_AREA_ID=${areaId}`;
-          try {
-            console.log(`  Navigating to UTK0205: GROUP_ID=${gid}`);
-            await page.goto(seatUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-            await new Promise(r => setTimeout(r, 3000));
-            for (let w = 0; w < 30; w++) {
-              const q = await page.evaluate(() => (document.body?.innerText || '').includes('購票人數眾多')).catch(() => false);
-              if (!q) break; if (w % 5 === 0) console.log(`    ⏳ Queue (${w*2}s)...`);
-              await new Promise(r => setTimeout(r, 2000));
-            }
-            const sr = await page.evaluate(() => ({
-              unsold: document.querySelectorAll('.seat-icon-empyt, .seat-empty').length,
-              sold: document.querySelectorAll('.seat-icon-sold, .seat-people').length,
-            })).catch(() => ({ unsold: 0, sold: 0 }));
-            u = sr.unsold || tableUnsold; s = sr.sold;
-            console.log(`    🪑 ${zoneName}: empty=${u} sold=${s}`);
-          } catch (e: any) { err = e.message; u = tableUnsold; console.log(`    ⚠️ ${e.message}`); }
-          total_unsold += u;
+          const result = await this.fetchSeatCountsBrowser(page, seatUrl, zoneName);
           await page.goto(utk0201Url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
           await new Promise(r => setTimeout(r, 2000));
-          details.push({ zone: zoneName, unsold: u, sold: s, total: u + s, error: err && !u && !s ? err : undefined });
+          if (result.u === -1) {
+            // 重試多次後仍讀取失敗：保留表格本身給的剩餘票數（若有），但不捏造已售數字，
+            // 維持 sold/total 未知，讓 patchDomeCapacity 或畫面明確顯示這區抓取失敗。
+            if (tableUnsold > 0) total_unsold += tableUnsold;
+            details.push({ zone: zoneName, unsold: tableUnsold, sold: -1, total: -1, error: result.err });
+          } else {
+            total_unsold += result.u;
+            details.push({ zone: zoneName, unsold: result.u, sold: result.s, total: result.u + result.s });
+          }
           continue;
         }
         details.push({ zone: zoneName, unsold: 0, sold: -1, total: -1 });
       }
       this.patchDomeCapacity(details);
       let sum_s = 0, sum_c = 0;
-      details.forEach(d => { if (d.sold !== undefined && d.sold >= 0) { sum_s += d.sold; sum_c += (d.unsold || 0) + d.sold; } else sum_c += d.unsold || 0; });
+      details.forEach(d => {
+        if (d.zone.includes('輪椅')) return; // 輪椅席不計入總計
+        if (d.sold !== undefined && d.sold >= 0) { sum_s += d.sold; sum_c += (d.unsold || 0) + d.sold; } else sum_c += d.unsold || 0;
+      });
       console.log(`\n✅ Complete! ${details.length} zones, unsold=${total_unsold} sold=${sum_s}`);
       return { total_unsold, total_sold: sum_s, total_capacity: sum_c, details };
     } catch (error) {
@@ -470,27 +511,24 @@ export class RakutenScraper implements ITicketScraper {
       if (onProgress) onProgress(`讀取分區: ${details[task.idx].zone}...`);
       console.log(`\n🖱️ [DOM] Fetching seat map for "${details[task.idx].zone}"`);
       const seatUrl = `${ordersBase}application/UTK02/UTK0205_.aspx?PERFORMANCE_ID=${performanceId}&GROUP_ID=${task.groupId}&PERFORMANCE_PRICE_AREA_ID=${task.areaId}`;
-      let u = 0, s = 0, err: string | undefined;
-      try {
-        console.log(`  Navigating to UTK0205: GROUP_ID=${task.groupId}`);
-        await page.goto(seatUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await new Promise(r => setTimeout(r, 3000));
-        for (let w = 0; w < 30; w++) {
-          const q = await page.evaluate(() => (document.body?.innerText || '').includes('購票人數眾多')).catch(() => false);
-          if (!q) break; if (w % 5 === 0) console.log(`    ⏳ Queue (${w*2}s)...`);
-          await new Promise(r => setTimeout(r, 2000));
-        }
-        const sr = await page.evaluate(() => ({ unsold: document.querySelectorAll('.seat-icon-empyt, .seat-empty').length, sold: document.querySelectorAll('.seat-icon-sold, .seat-people').length, })).catch(() => ({ unsold: 0, sold: 0 }));
-        u = sr.unsold; s = sr.sold; console.log(`    🪑 ${details[task.idx].zone}: empty=${u} sold=${s}`);
-      } catch (e: any) { err = e.message; console.log(`    ⚠️ ${e.message}`); }
-      total_unsold += u; details[task.idx].unsold = u; details[task.idx].sold = s; details[task.idx].total = u + s;
-      if (err && !u && !s) details[task.idx].error = err;
+      const result = await this.fetchSeatCountsBrowser(page, seatUrl, details[task.idx].zone);
+      if (result.u === -1) {
+        // 重試多次仍失敗：維持未知，不寫入假的 0/0（那會被誤判成這區已賣完/沒人要）
+        details[task.idx].sold = -1; details[task.idx].total = -1;
+        details[task.idx].error = result.err;
+      } else {
+        total_unsold += result.u;
+        details[task.idx].unsold = result.u; details[task.idx].sold = result.s; details[task.idx].total = result.u + result.s;
+      }
       await page.goto(utk0201Url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
       await new Promise(r => setTimeout(r, 2000));
     }
     this.patchDomeCapacity(details);
     let sum_s = 0, sum_c = 0;
-    details.forEach(d => { if (d.sold !== undefined && d.sold >= 0) { sum_s += d.sold; sum_c += (d.unsold || 0) + d.sold; } else sum_c += d.unsold || 0; });
+    details.forEach(d => {
+      if (d.zone.includes('輪椅')) return; // 輪椅席不計入總計
+      if (d.sold !== undefined && d.sold >= 0) { sum_s += d.sold; sum_c += (d.unsold || 0) + d.sold; } else sum_c += d.unsold || 0;
+    });
     console.log(`\n✅ [DOM] Complete! ${details.length} zones, unsold=${total_unsold} sold=${sum_s}`);
     return { total_unsold, total_sold: sum_s, total_capacity: sum_c, details };
   }

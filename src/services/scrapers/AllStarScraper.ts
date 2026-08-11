@@ -2,7 +2,7 @@ import { ITicketScraper, GameLink, TicketInfo, TicketZone } from './ITicketScrap
 import * as cheerio from 'cheerio';
 import * as fs from 'fs';
 import * as path from 'path';
-import { launchIbonBrowser, warmupIbonBrowser, waitForCfBypass, isCfChallengePage, waitForCfClear, getCachedGames, setCachedGames, dedupeGamesFetch } from './IbonBrowser.js';
+import { launchIbonBrowser, warmupIbonBrowser, waitForCfBypass, isCfChallengePage, waitForCfClear, getCachedGames, setCachedGames, dedupeGamesFetch, acquireSharedGamesContext, releaseSharedGamesContext } from './IbonBrowser.js';
 
 type SeatMapEntry = [string, number, number];
 
@@ -82,9 +82,10 @@ export class AllStarScraper implements ITicketScraper {
   private async fetchGamesUncached(): Promise<GameLink[]> {
     const ACTIVITY_URL = 'https://ticket.ibon.com.tw/ActivityInfo/Details/39701';
 
-    const attempt = async (headless: boolean): Promise<GameLink[]> => {
-      console.log(`Fetching All-Star Game games via browser (headless=${headless})...`);
-      const { context, page } = await launchIbonBrowser({ userDataDir: this.userDataDir, headless });
+    console.log('Fetching All-Star Game games via shared ibon browser...');
+    const context = await acquireSharedGamesContext();
+    try {
+      const page = await context.newPage();
       let apiResponse: string | null = null;
       const responseHandler = async (resp: any) => {
         if (resp.url().includes('/api/ActivityInfo/GetGameInfoList')) {
@@ -95,13 +96,10 @@ export class AllStarScraper implements ITicketScraper {
       page.on('response', responseHandler);
 
       try {
-        await warmupIbonBrowser(page, ACTIVITY_URL);
         await page.goto(ACTIVITY_URL, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
         await new Promise(r => setTimeout(r, 5000));
 
-        if (headless) {
-          if (!apiResponse && await isCfChallengePage(page)) throw new Error('Headless 模式遭遇驗證頁');
-        } else {
+        if (!apiResponse && await isCfChallengePage(page)) {
           await waitForCfClear(page, 180);
         }
 
@@ -110,33 +108,17 @@ export class AllStarScraper implements ITicketScraper {
 
         const games = this.parseGamesFromApi(apiResponse);
         if (!games.length) throw new Error('Could not fetch games (empty list)');
+
+        console.log(`Found ${games.length} games.`);
+        setCachedGames('allstar', games);
         return games;
       } finally {
         page.removeListener('response', responseHandler);
-        await context.close().catch(() => {});
+        await page.close().catch(() => {});
       }
-    };
-
-    let games: GameLink[] | undefined;
-    let lastError: any;
-    try {
-      games = await attempt(true);
-    } catch (error: any) {
-      console.log(`⚠️ Headless 嘗試失敗 (${error.message})，改用有視窗模式讓使用者手動驗證...`);
-      for (let retry = 0; retry < 2 && !games; retry++) {
-        try { games = await attempt(false); }
-        catch (error2: any) {
-          lastError = error2;
-          console.log(`⚠️ 有視窗模式第 ${retry + 1} 次嘗試失敗 (${error2.message})`);
-          if (retry === 0) await new Promise(r => setTimeout(r, 4000));
-        }
-      }
-      if (!games) throw lastError;
+    } finally {
+      releaseSharedGamesContext();
     }
-
-    console.log(`Found ${games.length} games.`);
-    setCachedGames('allstar', games);
-    return games;
   }
 
   private parseGamesFromApi(jsonStr: string): GameLink[] {

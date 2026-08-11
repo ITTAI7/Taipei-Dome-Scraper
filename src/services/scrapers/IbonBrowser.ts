@@ -339,3 +339,99 @@ export async function waitForCfBypass(page: Page, timeoutSec = 300): Promise<boo
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
+
+// ─── 場次清單共用瀏覽器（跨球團共用一個 CF session）──────────────
+// rakuten / uni / allstar 三個 ibon 球團的活動頁都在同一個網域
+// (ticket.ibon.com.tw)，CF 核發的 cf_clearance / __cf_bm cookie 是綁在
+// 網域上、不是綁在特定活動頁。因此不需要每個球團各開一個 Chrome、各過一次
+// CF：由第一個呼叫的球團負責啟動瀏覽器並通過 CF，之後的球團直接在同一個
+// context 開新分頁沿用該 session 抓資料即可。
+const SHARED_GAMES_PROFILE_DIR = path.join(os.tmpdir(), '.ibon-browser-data', 'shared-games');
+let sharedGamesContextPromise: Promise<BrowserContext> | null = null;
+let sharedGamesActiveUsers = 0;
+let sharedGamesIdleTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function establishSharedGamesContext(): Promise<BrowserContext> {
+  // 先試 headless：若這個共用 profile 先前已經通過 CF、cookie 仍有效，
+  // 通常可以直接無視窗過關。
+  try {
+    const { context, page } = await launchIbonBrowser({ userDataDir: SHARED_GAMES_PROFILE_DIR, headless: true });
+    await page.goto('https://ticket.ibon.com.tw', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    await sleep(3000);
+    if (!(await isCfChallengePage(page))) {
+      console.log('✅ 共用場次清單瀏覽器：headless 模式已通過 CF（沿用先前 session）');
+      // 不關閉這個分頁：真實 Chrome 在最後一個分頁關閉時會直接結束整個瀏覽器行程，
+      // 之後其他球團要 newPage() 就會失敗，所以刻意保留這一頁活著。
+      return context;
+    }
+    console.log('⚠️ 共用場次清單瀏覽器：headless 被 CF 擋下，改用有視窗模式...');
+    await context.close().catch(() => {});
+  } catch (e: any) {
+    console.log(`⚠️ 共用場次清單瀏覽器：headless 啟動失敗 (${e.message})，改用有視窗模式...`);
+  }
+
+  const { context, page } = await launchIbonBrowser({ userDataDir: SHARED_GAMES_PROFILE_DIR, headless: false });
+  await page.goto('https://ticket.ibon.com.tw', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+  const passed = await waitForCfClear(page, 180);
+  // 同樣刻意不關閉這個分頁，避免真實 Chrome 因為最後一頁關閉而整個行程一起結束。
+  if (!passed) {
+    await context.close().catch(() => {});
+    throw new Error('共用場次清單瀏覽器：等待 CF 驗證逾時');
+  }
+  return context;
+}
+
+/**
+ * 取得（或建立）供讀取比賽清單使用的共用瀏覽器 context。
+ * 多個球團同時呼叫時，只有第一個會真的啟動瀏覽器並處理 CF，
+ * 其餘呼叫會等待並拿到同一個已通過驗證的 context。
+ *
+ * 用完後務必呼叫 releaseSharedGamesContext()。
+ */
+export async function acquireSharedGamesContext(): Promise<BrowserContext> {
+  if (isCloudMode()) {
+    throw new Error('CLOUD_UNSUPPORTED_IBON: 雲端環境不支援 ibon 瀏覽器繞過機制，請使用本機版查詢');
+  }
+  if (sharedGamesIdleTimer) { clearTimeout(sharedGamesIdleTimer); sharedGamesIdleTimer = null; }
+  sharedGamesActiveUsers++;
+
+  if (!sharedGamesContextPromise) {
+    sharedGamesContextPromise = establishSharedGamesContext().then(context => {
+      // 只掛一次：萬一瀏覽器意外被關閉（例如使用者手動關掉視窗），重置狀態讓下次呼叫重新啟動
+      context.once('close', () => {
+        sharedGamesContextPromise = null;
+        sharedGamesActiveUsers = 0;
+      });
+      return context;
+    }).catch(err => {
+      sharedGamesContextPromise = null;
+      throw err;
+    });
+  }
+
+  try {
+    return await sharedGamesContextPromise;
+  } catch (err) {
+    sharedGamesActiveUsers = Math.max(0, sharedGamesActiveUsers - 1);
+    throw err;
+  }
+}
+
+/**
+ * 釋放共用瀏覽器 context 的使用權。當所有使用者都釋放後，
+ * 會有一段寬限期（讓幾乎同時發出的其他球團請求也能搭上同一個瀏覽器），
+ * 寬限期過後才真的關閉瀏覽器。
+ */
+export function releaseSharedGamesContext(): void {
+  sharedGamesActiveUsers = Math.max(0, sharedGamesActiveUsers - 1);
+  if (sharedGamesActiveUsers === 0) {
+    sharedGamesIdleTimer = setTimeout(() => {
+      sharedGamesIdleTimer = null;
+      if (sharedGamesActiveUsers === 0 && sharedGamesContextPromise) {
+        const promise = sharedGamesContextPromise;
+        sharedGamesContextPromise = null;
+        promise.then(ctx => ctx.close().catch(() => {})).catch(() => {});
+      }
+    }, 15000);
+  }
+}
