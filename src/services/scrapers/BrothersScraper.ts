@@ -1,5 +1,6 @@
 import { ITicketScraper, GameLink, TicketInfo, TicketZone } from './ITicketScraper.js';
 import * as cheerio from 'cheerio';
+import { localSafeFetch } from './localFetch.js';
 
 export class BrothersScraper implements ITicketScraper {
   private baseUrl = 'https://tix.ctbcsports.com/BROTHERS/';
@@ -8,7 +9,7 @@ export class BrothersScraper implements ITicketScraper {
     console.log('Fetching games via pure HTTP...');
     
     // Initial request to get cookies
-    const initRes = await fetch(new URL('UTK0101_', this.baseUrl));
+    const initRes = await localSafeFetch(new URL('UTK0101_', this.baseUrl));
     if (!initRes.ok) throw new Error('Failed to load UTK0101_');
     
     let cookies: string[] = [];
@@ -26,7 +27,7 @@ export class BrothersScraper implements ITicketScraper {
     const reqVer = $('input[name="__RequestVerificationToken"]').attr('value') || '';
     const auth = $('input[name="__JWtToken"]').attr('value') || '';
 
-    const evRes = await fetch(new URL('UTK0101_/GET_CALENDAR_EVENTS', this.baseUrl), {
+    const evRes = await localSafeFetch(new URL('UTK0101_/GET_CALENDAR_EVENTS', this.baseUrl), {
       method: 'POST',
       headers: {
         'X-Requested-With': 'XMLHttpRequest',
@@ -97,7 +98,7 @@ export class BrothersScraper implements ITicketScraper {
        
        let retries = 0;
        while (retries < 5) {
-           const res = await fetch(new URL(url, this.baseUrl).href, opts);
+           const res = await localSafeFetch(new URL(url, this.baseUrl).href, opts);
            let setCookies = res.headers.getSetCookie();
            if(setCookies){
                setCookies.forEach(c => {
@@ -131,7 +132,7 @@ export class BrothersScraper implements ITicketScraper {
     auth = $1('input[name="__JWtToken"]').attr('value') || '';
 
     const pListUrl = `PerformanceListControl?PRODUCT_ID=${uProductId}&STARTDATE=${encodeURIComponent(uStartDate)}&SEASON_TICKET_ID=&ItemMaxNumber=4`;
-    const pListRes = await fetch(new URL(pListUrl, this.baseUrl).href, {
+    const pListRes = await localSafeFetch(new URL(pListUrl, this.baseUrl).href, {
        headers: {
            'Cookie': Array.from(allCookies.entries()).map(([k,v])=>`${k}=${v}`).join('; '),
            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',

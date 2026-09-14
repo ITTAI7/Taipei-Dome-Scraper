@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import { ITicketScraper, GameLink, TicketInfo, TicketZone } from './ITicketScraper.js';
+import { localSafeFetch } from './localFetch.js';
 
 export class WeiChuanScraper implements ITicketScraper {
   private baseUrl = 'https://tix.wdragons.com/';
@@ -12,7 +13,7 @@ export class WeiChuanScraper implements ITicketScraper {
   
   async getGames(): Promise<GameLink[]> {
     console.log('Fetching WeiChuan games...');
-    const initRes = await fetch(new URL('UTK0101_', this.baseUrl));
+    const initRes = await localSafeFetch(new URL('UTK0101_', this.baseUrl));
     if (!initRes.ok) throw new Error('Failed to load UTK0101_');
     
     let cookies: string[] = [];
@@ -27,7 +28,7 @@ export class WeiChuanScraper implements ITicketScraper {
     const reqVer = $('input[name="__RequestVerificationToken"]').attr('value') || '';
     const auth = $('input[name="__JWtToken"]').attr('value') || '';
 
-    const evRes = await fetch(new URL('UTK0101_/GET_CALENDAR_EVENTS', this.baseUrl), {
+    const evRes = await localSafeFetch(new URL('UTK0101_/GET_CALENDAR_EVENTS', this.baseUrl), {
       method: 'POST',
       headers: {
         'X-Requested-With': 'XMLHttpRequest',
@@ -58,7 +59,7 @@ export class WeiChuanScraper implements ITicketScraper {
          if (!tEvent) return;
          try {
             const startDate = tEvent.S_SHOW_START_DATETIME.substring(0, 10);
-            const res = await fetch(new URL(`UTK0201_?PRODUCT_ID=${tEvent.PRODUCT_ID}&STARTDATE=${startDate}`, this.baseUrl).href, {
+            const res = await localSafeFetch(new URL(`UTK0201_?PRODUCT_ID=${tEvent.PRODUCT_ID}&STARTDATE=${startDate}`, this.baseUrl).href, {
                headers: {
                  'Cookie': cookieStr,
                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
@@ -137,7 +138,7 @@ export class WeiChuanScraper implements ITicketScraper {
        };
        if(referer) opts.headers['Referer'] = referer;
        
-       const res = await fetch(new URL(url, this.baseUrl).href, opts);
+       const res = await localSafeFetch(new URL(url, this.baseUrl).href, opts);
        if (typeof res.headers.getSetCookie === 'function') {
            updateCookies(res.headers.getSetCookie());
        }
@@ -155,7 +156,7 @@ export class WeiChuanScraper implements ITicketScraper {
     const auth = $1('input[name="__JWtToken"]').attr('value') || '';
 
     const pListUrl = `PerformanceListControl?PRODUCT_ID=${uProductId}&STARTDATE=${encodeURIComponent(uStartDate)}&SEASON_TICKET_ID=&ItemMaxNumber=4`;
-    const pListRes = await fetch(new URL(pListUrl, this.baseUrl).href, {
+    const pListRes = await localSafeFetch(new URL(pListUrl, this.baseUrl).href, {
        headers: {
            'Cookie': cookieStr,
            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',

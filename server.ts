@@ -5,6 +5,7 @@ import * as cheerio from 'cheerio';
 import { fileURLToPath } from 'url';
 import { ScraperFactory } from './src/services/scrapers/ScraperFactory.js';
 import { WeiChuanScraper } from './src/services/scrapers/WeiChuanScraper.js';
+import { localSafeFetch } from './src/services/scrapers/localFetch.js';
 
 async function startServer() {
   const app = express();
@@ -29,7 +30,7 @@ async function startServer() {
             'Upgrade-Insecure-Requests': '1'
         };
         
-        const initRes = await fetch(new URL('UTK0102_', baseUrl), { headers });
+        const initRes = await localSafeFetch(new URL('UTK0102_', baseUrl), { headers });
         let cookies: string[] = [];
         if (typeof initRes.headers.getSetCookie === 'function') {
           cookies = initRes.headers.getSetCookie();
@@ -43,7 +44,7 @@ async function startServer() {
         const jwt = $('input[name="__JWtToken"]').val() as string || '';
         
         // Fetch captcha image (ERA systems usually use CaptchaImage.aspx or similar)
-        const captRes = await fetch(new URL(`/Home/pic?TYPE=UTK1306&ts=${Date.now()}`, baseUrl).href, {
+        const captRes = await localSafeFetch(new URL(`/Home/pic?TYPE=UTK1306&ts=${Date.now()}`, baseUrl).href, {
             headers: { 
                 ...headers,
                 'Cookie': cookieStr,
@@ -116,7 +117,7 @@ async function startServer() {
       // Wait we need encodeURIComponent? URLSearchParams does it.
       loginParams.append('CHK', captcha);
       
-      const loginRes = await fetch('https://tix.wdragons.com/Action/Login', {
+      const loginRes = await localSafeFetch('https://tix.wdragons.com/Action/Login', {
          method: 'POST',
          headers: {
              'Accept': '*/*',

@@ -61,9 +61,7 @@ export default function App() {
   const [allGames, setAllGames] = useState<{ brothers: Game[], weichuan: Game[], fubon: Game[], tsg: Game[], rakuten: Game[], uni: Game[], allstar: Game[] }>({ brothers: [], weichuan: [], fubon: [], tsg: [], rakuten: [], uni: [], allstar: [] });
   const [selectedGame, setSelectedGame] = useState<string>('');
   const [loadingGames, setLoadingGames] = useState(true);
-  
-  const [showTaipeiDomeOnly, setShowTaipeiDomeOnly] = useState(true);
-  
+
   const [ticketData, setTicketData] = useState<TicketData | null>(null);
   const [loadingTickets, setLoadingTickets] = useState(false);
   const [scrapingProgress, setScrapingProgress] = useState<string[]>([]);
@@ -75,8 +73,6 @@ export default function App() {
     }
   }, [scrapingProgress]);
   
-  const [totalSeats, setTotalSeats] = useState(37000);
-  const [isTotalSeatsConfigOpen, setIsTotalSeatsConfigOpen] = useState(false);
   const [isStaffConfigOpen, setIsStaffConfigOpen] = useState(false);
   const [staffRules, setStaffRules] = useState<StaffRule[]>([
     { id: '1', max: 15000, count: 4 },
@@ -150,39 +146,15 @@ export default function App() {
 
   useEffect(() => {
     // When activeTeam changes, reset selectedGame to the first game of that team
-    const currentTeamGamesRaw = allGames[activeTeam] || [];
-    const currentTeamGames = activeTeam === 'tsg' && showTaipeiDomeOnly 
-        ? currentTeamGamesRaw.filter(g => g.title.includes('大巨蛋'))
-        : currentTeamGamesRaw;
-        
+    const currentTeamGames = allGames[activeTeam] || [];
     if (currentTeamGames.length > 0) {
       setSelectedGame(currentTeamGames[0].link);
     } else {
       setSelectedGame('');
     }
-  }, [activeTeam, allGames, showTaipeiDomeOnly]);
+  }, [activeTeam, allGames]);
 
-  useEffect(() => {
-    if (!selectedGame) return;
-    const currentTeamGamesRaw = allGames[activeTeam] || [];
-    const game = currentTeamGamesRaw.find(g => g.link === selectedGame);
-    if (game) {
-      if (game.title.includes('大巨蛋')) {
-        setTotalSeats(37000);
-      } else if (game.title.includes('澄清湖')) {
-        setTotalSeats(20000);
-      } else if (game.title.includes('嘉義市')) {
-        setTotalSeats(10000);
-      } else {
-        setTotalSeats(37000); // 預設其它
-      }
-    }
-  }, [selectedGame, allGames, activeTeam]);
-
-  const currentGamesForTeamRaw = allGames[activeTeam] || [];
-  const currentGamesForTeam = activeTeam === 'tsg' && showTaipeiDomeOnly
-    ? currentGamesForTeamRaw.filter(g => g.title.includes('大巨蛋'))
-    : currentGamesForTeamRaw;
+  const currentGamesForTeam = allGames[activeTeam] || [];
 
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [loginForm, setLoginForm] = useState({ username: '', password: '', captcha: '' });
@@ -345,7 +317,7 @@ export default function App() {
       csvContent += `${zoneName},${unsold},${soldStr},${errorStr}\n`;
     });
 
-    const globalSold = ticketData.total_sold !== undefined ? ticketData.total_sold : (totalSeats - ticketData.total_unsold);
+    const globalSold = ticketData.total_sold ?? 0;
     csvContent += `總計,${ticketData.total_unsold},${globalSold}\n`;
     
     const encodedUri = encodeURI(csvContent);
@@ -382,7 +354,7 @@ export default function App() {
         {/* Header */}
         <header className={`p-4 sticky top-0 z-10 flex items-center justify-center gap-2 transition-colors ${activeTeam === 'brothers' ? 'bg-yellow-400 border-b border-yellow-500' : activeTeam === 'weichuan' ? 'bg-red-600 outline-none border-b border-red-700' : activeTeam === 'tsg' ? 'bg-[#00604A] border-b border-[#004A3A]' : activeTeam === 'rakuten' ? 'bg-[#BE1E2D] border-b border-[#9E1824]' : activeTeam === 'uni' ? 'bg-[#EC6A1A] border-b border-[#C55A16]' : activeTeam === 'allstar' ? 'bg-[#D4AF37] border-b border-[#B8960F]' : 'bg-[#004A9C] border-b border-[#003875]'}`}>
           <Ticket className={`w-6 h-6 ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`} />
-          <h1 className={`text-xl font-bold tracking-tight ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`}>大巨蛋售票極速查詢</h1>
+          <h1 className={`text-xl font-bold tracking-tight ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`}>大巨蛋售票極速查詢 v0.9</h1>
         </header>
         
         {/* Main Content */}
@@ -461,18 +433,6 @@ export default function App() {
 
           {/* Query Section */}
           <section className="space-y-4">
-            
-            {activeTeam === 'tsg' && (
-              <label className="flex items-center space-x-2 text-sm text-gray-700 select-none cursor-pointer">
-                 <input 
-                   type="checkbox" 
-                   checked={showTaipeiDomeOnly}
-                   onChange={(e) => setShowTaipeiDomeOnly(e.target.checked)}
-                   className="w-4 h-4 text-[#00604A] border-gray-300 rounded focus:ring-[#00604A]"
-                 />
-                 <span>僅顯示臺北大巨蛋場次</span>
-              </label>
-            )}
 
             <div className="relative border-b border-gray-100 pb-2">
               {loadingGames ? (
@@ -562,18 +522,9 @@ export default function App() {
                 <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 p-5 rounded-2xl flex flex-col justify-between shadow-sm relative group">
                   <div className="flex justify-between items-center">
                     <span className="text-blue-700 text-sm font-bold tracking-wide opacity-90">已售出(人)</span>
-                    {ticketData.total_sold === undefined && (
-                      <button 
-                        onClick={() => setIsTotalSeatsConfigOpen(true)}
-                        className="p-1.5 text-blue-600 hover:bg-blue-200 hover:text-blue-800 rounded-full transition-colors"
-                        title="設定總票數"
-                      >
-                        <Settings className="w-4 h-4" />
-                      </button>
-                    )}
                   </div>
                   <span className="text-4xl font-black text-blue-900 mt-2">
-                    {(ticketData.total_sold !== undefined ? ticketData.total_sold : (totalSeats - ticketData.total_unsold)).toLocaleString()}
+                    {(ticketData.total_sold ?? 0).toLocaleString()}
                   </span>
                 </div>
                 
@@ -598,7 +549,7 @@ export default function App() {
                     </button>
                   </div>
                   <span className="text-4xl font-black text-emerald-900 mt-2">
-                    {getSupportStaffCount(ticketData.total_sold !== undefined ? ticketData.total_sold : (totalSeats - ticketData.total_unsold))}
+                    {getSupportStaffCount(ticketData.total_sold ?? 0)}
                   </span>
                 </div>
 
@@ -606,7 +557,7 @@ export default function App() {
                 <div className="bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-200 p-5 rounded-2xl flex flex-col justify-between shadow-sm">
                   <span className="text-orange-700 text-sm font-bold tracking-wide opacity-90">疏運時間(分)</span>
                   <span className="text-4xl font-black text-orange-900 mt-2">
-                    {10 + Math.ceil((ticketData.total_sold !== undefined ? ticketData.total_sold : (totalSeats - ticketData.total_unsold)) / 500)}
+                    {10 + Math.ceil((ticketData.total_sold ?? 0) / 500)}
                   </span>
                 </div>
               </div>
@@ -626,46 +577,6 @@ export default function App() {
               </div>
             </section>
           )}
-          {/* Total Seats Config Dialog */}
-          {isTotalSeatsConfigOpen && (
-            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
-              <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden flex flex-col">
-                {/* Header */}
-                <div className="bg-blue-500 p-4 flex justify-between items-center text-white">
-                  <h2 className="font-bold text-lg flex items-center gap-2"><Ticket className="w-5 h-5"/> 總票數設定</h2>
-                  <button onClick={() => setIsTotalSeatsConfigOpen(false)} className="hover:bg-blue-600 p-1.5 rounded-full transition-colors"><X className="w-5 h-5" /></button>
-                </div>
-                
-                {/* Body */}
-                <div className="p-6 space-y-4 bg-blue-50/30">
-                  <div className="space-y-2">
-                    <label className="text-sm font-bold text-gray-700 block">全場座位總數</label>
-                    <input 
-                      type="number" 
-                      className="w-full border border-gray-300 rounded-xl p-3 text-lg font-bold focus:ring-2 focus:ring-blue-400 focus:outline-none shadow-sm"
-                      value={totalSeats}
-                      onChange={(e) => setTotalSeats(parseInt(e.target.value, 10) || 0)}
-                      autoFocus
-                    />
-                    <p className="text-xs text-gray-500">
-                      此數值將用於計算「已售出人數」、「支援人力」以及「疏運時間」。
-                    </p>
-                  </div>
-                </div>
-                
-                {/* Footer */}
-                <div className="p-4 border-t border-gray-100 bg-white">
-                   <button 
-                     onClick={() => setIsTotalSeatsConfigOpen(false)}
-                     className="w-full bg-blue-500 text-white font-bold py-3 rounded-xl hover:bg-blue-600 active:scale-[0.98] transition-all shadow-md"
-                   >
-                     完成設定
-                   </button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Staff Config Dialog */}
           {isStaffConfigOpen && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">

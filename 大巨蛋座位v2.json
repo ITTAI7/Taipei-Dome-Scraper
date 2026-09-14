@@ -1,0 +1,1176 @@
+{
+  "_說明": "以 大巨蛋座位.json（v1）為基礎，逐區比對台鋼官方 activity-venues API 的真實 seatCount。match=false 代表台鋼官方數字跟 v1 不同，tsg_codes 是台鋼每個分區代號（含拆前/後排）各自的真實座位數，可用來人工比對、反推實際前/後排分法。資料來源：2026-09-24 台鋼 vs 富邦（AC_260729TP2888）大巨蛋場次，已驗證同場館跨場次 seatCount 一致。",
+  "zones": [
+    {
+      "floor": "B1",
+      "zone": 102,
+      "capacity_v1": 189,
+      "tsg_codes": {
+        "TP102": 189
+      },
+      "tsg_total": 189,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 103,
+      "capacity_v1": 576,
+      "tsg_codes": {
+        "TP103": 576
+      },
+      "tsg_total": 576,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 104,
+      "capacity_v1": 724,
+      "tsg_codes": {
+        "TP104": 724
+      },
+      "tsg_total": 724,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 105,
+      "capacity_v1": 795,
+      "tsg_codes": {
+        "TP105": 795
+      },
+      "tsg_total": 795,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 106,
+      "capacity_v1": 855,
+      "tsg_codes": {
+        "TP106B": 453,
+        "TP106F": 402
+      },
+      "tsg_total": 855,
+      "match": true,
+      "note": "此分區台鋼拆成前/後排分開賣，上面 tsg_codes 就是各排的真實座位數"
+    },
+    {
+      "floor": "B1",
+      "zone": 107,
+      "capacity_v1": 732,
+      "tsg_codes": {
+        "TP107B": 453,
+        "TP107F": 279
+      },
+      "tsg_total": 732,
+      "match": true,
+      "note": "此分區台鋼拆成前/後排分開賣，上面 tsg_codes 就是各排的真實座位數"
+    },
+    {
+      "floor": "B1",
+      "zone": 108,
+      "capacity_v1": 562,
+      "tsg_codes": {
+        "TP108B": 368,
+        "TP108F": 245
+      },
+      "tsg_total": 613,
+      "match": false,
+      "diff": 51,
+      "note": "此分區台鋼拆成前/後排分開賣，上面 tsg_codes 就是各排的真實座位數",
+      "tsg_wheelchair": {
+        "TP108W": 7,
+        "TP108WF": 7
+      }
+    },
+    {
+      "floor": "B1",
+      "zone": 109,
+      "capacity_v1": 459,
+      "tsg_codes": {
+        "TP109B": 312,
+        "TP109F": 180
+      },
+      "tsg_total": 492,
+      "match": false,
+      "diff": 33,
+      "note": "此分區台鋼拆成前/後排分開賣，上面 tsg_codes 就是各排的真實座位數",
+      "tsg_wheelchair": {
+        "TP109W": 6,
+        "TP109WF": 6
+      }
+    },
+    {
+      "floor": "B1",
+      "zone": 110,
+      "capacity_v1": 474,
+      "tsg_codes": {
+        "TP110B": 323,
+        "TP110F": 194
+      },
+      "tsg_total": 517,
+      "match": false,
+      "diff": 43,
+      "note": "此分區台鋼拆成前/後排分開賣，上面 tsg_codes 就是各排的真實座位數",
+      "tsg_wheelchair": {
+        "TP110W": 3,
+        "TP110WF": 3
+      }
+    },
+    {
+      "floor": "B1",
+      "zone": 111,
+      "capacity_v1": 335,
+      "tsg_codes": {
+        "TP111": 351
+      },
+      "tsg_total": 351,
+      "match": false,
+      "diff": 16
+    },
+    {
+      "floor": "B1",
+      "zone": 112,
+      "capacity_v1": 475,
+      "tsg_codes": {
+        "TP112B": 310,
+        "TP112F": 165
+      },
+      "tsg_total": 475,
+      "match": true,
+      "note": "此分區台鋼拆成前/後排分開賣，上面 tsg_codes 就是各排的真實座位數"
+    },
+    {
+      "floor": "B1",
+      "zone": 113,
+      "capacity_v1": 627,
+      "tsg_codes": {
+        "TP113B": 402,
+        "TP113F": 225
+      },
+      "tsg_total": 627,
+      "match": true,
+      "note": "此分區台鋼拆成前/後排分開賣，上面 tsg_codes 就是各排的真實座位數"
+    },
+    {
+      "floor": "B1",
+      "zone": 114,
+      "capacity_v1": 475,
+      "tsg_codes": {
+        "TP114B": 310,
+        "TP114F": 165
+      },
+      "tsg_total": 475,
+      "match": true,
+      "note": "此分區台鋼拆成前/後排分開賣，上面 tsg_codes 就是各排的真實座位數"
+    },
+    {
+      "floor": "B1",
+      "zone": 115,
+      "capacity_v1": 335,
+      "tsg_codes": {
+        "TP115": 351
+      },
+      "tsg_total": 351,
+      "match": false,
+      "diff": 16
+    },
+    {
+      "floor": "B1",
+      "zone": 116,
+      "capacity_v1": 474,
+      "tsg_codes": {
+        "TP116B": 323,
+        "TP116F": 194
+      },
+      "tsg_total": 517,
+      "match": false,
+      "diff": 43,
+      "note": "此分區台鋼拆成前/後排分開賣，上面 tsg_codes 就是各排的真實座位數",
+      "tsg_wheelchair": {
+        "TP116W": 3,
+        "TP116WF": 3
+      }
+    },
+    {
+      "floor": "B1",
+      "zone": 117,
+      "capacity_v1": 459,
+      "tsg_codes": {
+        "TP117B": 312,
+        "TP117F": 180
+      },
+      "tsg_total": 492,
+      "match": false,
+      "diff": 33,
+      "note": "此分區台鋼拆成前/後排分開賣，上面 tsg_codes 就是各排的真實座位數",
+      "tsg_wheelchair": {
+        "TP117W": 6,
+        "TP117WF": 6
+      }
+    },
+    {
+      "floor": "B1",
+      "zone": 118,
+      "capacity_v1": 562,
+      "tsg_codes": {
+        "TP118B": 368,
+        "TP118F": 245
+      },
+      "tsg_total": 613,
+      "match": false,
+      "diff": 51,
+      "note": "此分區台鋼拆成前/後排分開賣，上面 tsg_codes 就是各排的真實座位數",
+      "tsg_wheelchair": {
+        "TP118W": 7,
+        "TP118WF": 7
+      }
+    },
+    {
+      "floor": "B1",
+      "zone": 119,
+      "capacity_v1": 732,
+      "tsg_codes": {
+        "TP119B": 453,
+        "TP119F": 279
+      },
+      "tsg_total": 732,
+      "match": true,
+      "note": "此分區台鋼拆成前/後排分開賣，上面 tsg_codes 就是各排的真實座位數"
+    },
+    {
+      "floor": "B1",
+      "zone": 120,
+      "capacity_v1": 855,
+      "tsg_codes": {
+        "TP120B": 453,
+        "TP120F": 402
+      },
+      "tsg_total": 855,
+      "match": true,
+      "note": "此分區台鋼拆成前/後排分開賣，上面 tsg_codes 就是各排的真實座位數"
+    },
+    {
+      "floor": "B1",
+      "zone": 121,
+      "capacity_v1": 795,
+      "tsg_codes": {
+        "TP121": 795
+      },
+      "tsg_total": 795,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 122,
+      "capacity_v1": 724,
+      "tsg_codes": {
+        "TP122": 724
+      },
+      "tsg_total": 724,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 123,
+      "capacity_v1": 577,
+      "tsg_codes": {
+        "TP123": 577
+      },
+      "tsg_total": 577,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 124,
+      "capacity_v1": 189,
+      "tsg_codes": {
+        "TP124": 189
+      },
+      "tsg_total": 189,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 131,
+      "capacity_v1": 97,
+      "tsg_codes": {
+        "TP131": 100
+      },
+      "tsg_total": 100,
+      "match": false,
+      "diff": 3
+    },
+    {
+      "floor": "B1",
+      "zone": 132,
+      "capacity_v1": 274,
+      "tsg_codes": {
+        "TP132": 274
+      },
+      "tsg_total": 274,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 133,
+      "capacity_v1": 305,
+      "tsg_codes": {
+        "TP133": 305
+      },
+      "tsg_total": 305,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 134,
+      "capacity_v1": 291,
+      "tsg_codes": {
+        "TP134": 291
+      },
+      "tsg_total": 291,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 135,
+      "capacity_v1": 267,
+      "tsg_codes": {
+        "TP135": 259
+      },
+      "tsg_total": 259,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP135W": 4,
+        "TP135WF": 4
+      }
+    },
+    {
+      "floor": "B1",
+      "zone": 136,
+      "capacity_v1": 267,
+      "tsg_codes": {
+        "TP136": 259
+      },
+      "tsg_total": 259,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP136W": 4,
+        "TP136WF": 4
+      }
+    },
+    {
+      "floor": "B1",
+      "zone": 137,
+      "capacity_v1": 291,
+      "tsg_codes": {
+        "TP137": 291
+      },
+      "tsg_total": 291,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 140,
+      "capacity_v1": 291,
+      "tsg_codes": {
+        "TP140": 291
+      },
+      "tsg_total": 291,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 141,
+      "capacity_v1": 267,
+      "tsg_codes": {
+        "TP141": 259
+      },
+      "tsg_total": 259,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP141W": 4,
+        "TP141WF": 4
+      }
+    },
+    {
+      "floor": "B1",
+      "zone": 142,
+      "capacity_v1": 267,
+      "tsg_codes": {
+        "TP142": 259
+      },
+      "tsg_total": 259,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP142W": 4,
+        "TP142WF": 4
+      }
+    },
+    {
+      "floor": "B1",
+      "zone": 143,
+      "capacity_v1": 185,
+      "tsg_codes": null,
+      "note": "台鋼官方資料查無此分區（可能是台鋼不賣這一區，或代號規則不同）"
+    },
+    {
+      "floor": "B1",
+      "zone": 144,
+      "capacity_v1": 198,
+      "tsg_codes": {
+        "TP144": 198
+      },
+      "tsg_total": 198,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 145,
+      "capacity_v1": 273,
+      "tsg_codes": {
+        "TP145": 273
+      },
+      "tsg_total": 273,
+      "match": true
+    },
+    {
+      "floor": "B1",
+      "zone": 146,
+      "capacity_v1": 97,
+      "tsg_codes": {
+        "TP146": 100
+      },
+      "tsg_total": 100,
+      "match": false,
+      "diff": 3
+    },
+    {
+      "floor": "L2",
+      "zone": 201,
+      "capacity_v1": 60,
+      "tsg_codes": {
+        "TP201": 60
+      },
+      "tsg_total": 60,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 202,
+      "capacity_v1": 212,
+      "tsg_codes": {
+        "TP202": 212
+      },
+      "tsg_total": 212,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 203,
+      "capacity_v1": 417,
+      "tsg_codes": {
+        "TP203": 417
+      },
+      "tsg_total": 417,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 204,
+      "capacity_v1": 499,
+      "tsg_codes": {
+        "TP204": 499
+      },
+      "tsg_total": 499,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 205,
+      "capacity_v1": 499,
+      "tsg_codes": {
+        "TP205": 499
+      },
+      "tsg_total": 499,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 206,
+      "capacity_v1": 499,
+      "tsg_codes": {
+        "TP206": 499
+      },
+      "tsg_total": 499,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 207,
+      "capacity_v1": 459,
+      "tsg_codes": {
+        "TP207": 443
+      },
+      "tsg_total": 443,
+      "match": false,
+      "diff": -16,
+      "tsg_wheelchair": {
+        "TP207W": 8,
+        "TP207WF": 8
+      }
+    },
+    {
+      "floor": "L2",
+      "zone": 208,
+      "capacity_v1": 400,
+      "tsg_codes": {
+        "TP208": 392
+      },
+      "tsg_total": 392,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP208W": 4,
+        "TP208WF": 4
+      }
+    },
+    {
+      "floor": "L2",
+      "zone": 209,
+      "capacity_v1": 393,
+      "tsg_codes": {
+        "TP209": 393
+      },
+      "tsg_total": 393,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 210,
+      "capacity_v1": 360,
+      "tsg_codes": {
+        "TP210": 346
+      },
+      "tsg_total": 346,
+      "match": false,
+      "diff": -14,
+      "tsg_wheelchair": {
+        "TP210W": 7,
+        "TP210WF": 7
+      }
+    },
+    {
+      "floor": "L2",
+      "zone": 211,
+      "capacity_v1": 393,
+      "tsg_codes": {
+        "TP211": 393
+      },
+      "tsg_total": 393,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 212,
+      "capacity_v1": 266,
+      "tsg_codes": {
+        "TP212": 260
+      },
+      "tsg_total": 260,
+      "match": false,
+      "diff": -6,
+      "tsg_wheelchair": {
+        "TP212W": 3,
+        "TP212WF": 3
+      }
+    },
+    {
+      "floor": "L2",
+      "zone": 213,
+      "capacity_v1": 243,
+      "tsg_codes": null,
+      "note": "台鋼官方資料查無此分區（可能是台鋼不賣這一區，或代號規則不同）"
+    },
+    {
+      "floor": "L2",
+      "zone": 214,
+      "capacity_v1": 266,
+      "tsg_codes": {
+        "TP214": 260
+      },
+      "tsg_total": 260,
+      "match": false,
+      "diff": -6,
+      "tsg_wheelchair": {
+        "TP214W": 3,
+        "TP214WF": 3
+      }
+    },
+    {
+      "floor": "L2",
+      "zone": 215,
+      "capacity_v1": 393,
+      "tsg_codes": {
+        "TP215": 393
+      },
+      "tsg_total": 393,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 216,
+      "capacity_v1": 360,
+      "tsg_codes": {
+        "TP216": 346
+      },
+      "tsg_total": 346,
+      "match": false,
+      "diff": -14,
+      "tsg_wheelchair": {
+        "TP216W": 7,
+        "TP216WF": 7
+      }
+    },
+    {
+      "floor": "L2",
+      "zone": 217,
+      "capacity_v1": 393,
+      "tsg_codes": {
+        "TP217": 393
+      },
+      "tsg_total": 393,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 218,
+      "capacity_v1": 400,
+      "tsg_codes": {
+        "TP218": 392
+      },
+      "tsg_total": 392,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP218W": 4,
+        "TP218WF": 4
+      }
+    },
+    {
+      "floor": "L2",
+      "zone": 219,
+      "capacity_v1": 459,
+      "tsg_codes": {
+        "TP219": 443
+      },
+      "tsg_total": 443,
+      "match": false,
+      "diff": -16,
+      "tsg_wheelchair": {
+        "TP219W": 8,
+        "TP219WF": 8
+      }
+    },
+    {
+      "floor": "L2",
+      "zone": 220,
+      "capacity_v1": 499,
+      "tsg_codes": {
+        "TP220": 499
+      },
+      "tsg_total": 499,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 221,
+      "capacity_v1": 499,
+      "tsg_codes": {
+        "TP221": 499
+      },
+      "tsg_total": 499,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 222,
+      "capacity_v1": 499,
+      "tsg_codes": {
+        "TP222": 499
+      },
+      "tsg_total": 499,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 223,
+      "capacity_v1": 417,
+      "tsg_codes": {
+        "TP223": 417
+      },
+      "tsg_total": 417,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 224,
+      "capacity_v1": 212,
+      "tsg_codes": {
+        "TP224": 212
+      },
+      "tsg_total": 212,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 225,
+      "capacity_v1": 60,
+      "tsg_codes": {
+        "TP225": 60
+      },
+      "tsg_total": 60,
+      "match": true
+    },
+    {
+      "floor": "L2",
+      "zone": 233,
+      "capacity_v1": 143,
+      "tsg_codes": null,
+      "note": "台鋼官方資料查無此分區（可能是台鋼不賣這一區，或代號規則不同）"
+    },
+    {
+      "floor": "L2",
+      "zone": 234,
+      "capacity_v1": 446,
+      "tsg_codes": null,
+      "note": "台鋼官方資料查無此分區（可能是台鋼不賣這一區，或代號規則不同）"
+    },
+    {
+      "floor": "L2",
+      "zone": 235,
+      "capacity_v1": 477,
+      "tsg_codes": null,
+      "note": "台鋼官方資料查無此分區（可能是台鋼不賣這一區，或代號規則不同）"
+    },
+    {
+      "floor": "L2",
+      "zone": 236,
+      "capacity_v1": 477,
+      "tsg_codes": null,
+      "note": "台鋼官方資料查無此分區（可能是台鋼不賣這一區，或代號規則不同）"
+    },
+    {
+      "floor": "L2",
+      "zone": 237,
+      "capacity_v1": 477,
+      "tsg_codes": null,
+      "note": "台鋼官方資料查無此分區（可能是台鋼不賣這一區，或代號規則不同）"
+    },
+    {
+      "floor": "L2",
+      "zone": 240,
+      "capacity_v1": 477,
+      "tsg_codes": null,
+      "note": "台鋼官方資料查無此分區（可能是台鋼不賣這一區，或代號規則不同）"
+    },
+    {
+      "floor": "L2",
+      "zone": 241,
+      "capacity_v1": 477,
+      "tsg_codes": null,
+      "note": "台鋼官方資料查無此分區（可能是台鋼不賣這一區，或代號規則不同）"
+    },
+    {
+      "floor": "L2",
+      "zone": 242,
+      "capacity_v1": 477,
+      "tsg_codes": null,
+      "note": "台鋼官方資料查無此分區（可能是台鋼不賣這一區，或代號規則不同）"
+    },
+    {
+      "floor": "L2",
+      "zone": 243,
+      "capacity_v1": 446,
+      "tsg_codes": null,
+      "note": "台鋼官方資料查無此分區（可能是台鋼不賣這一區，或代號規則不同）"
+    },
+    {
+      "floor": "L2",
+      "zone": 244,
+      "capacity_v1": 143,
+      "tsg_codes": null,
+      "note": "台鋼官方資料查無此分區（可能是台鋼不賣這一區，或代號規則不同）"
+    },
+    {
+      "floor": "L4",
+      "zone": 401,
+      "capacity_v1": 101,
+      "tsg_codes": {
+        "TP401": 101
+      },
+      "tsg_total": 101,
+      "match": true
+    },
+    {
+      "floor": "L4",
+      "zone": 402,
+      "capacity_v1": 171,
+      "tsg_codes": {
+        "TP402": 171
+      },
+      "tsg_total": 171,
+      "match": true
+    },
+    {
+      "floor": "L4",
+      "zone": 403,
+      "capacity_v1": 160,
+      "tsg_codes": {
+        "TP403": 152
+      },
+      "tsg_total": 152,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP403W": 4,
+        "TP403WF": 4
+      }
+    },
+    {
+      "floor": "L4",
+      "zone": 404,
+      "capacity_v1": 149,
+      "tsg_codes": {
+        "TP404": 141
+      },
+      "tsg_total": 141,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP404W": 4,
+        "TP404WF": 4
+      }
+    },
+    {
+      "floor": "L4",
+      "zone": 405,
+      "capacity_v1": 150,
+      "tsg_codes": {
+        "TP405": 150
+      },
+      "tsg_total": 150,
+      "match": true
+    },
+    {
+      "floor": "L4",
+      "zone": 406,
+      "capacity_v1": 144,
+      "tsg_codes": {
+        "TP406": 136
+      },
+      "tsg_total": 136,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP406W": 4,
+        "TP406WF": 4
+      }
+    },
+    {
+      "floor": "L4",
+      "zone": 407,
+      "capacity_v1": 144,
+      "tsg_codes": {
+        "TP407": 136
+      },
+      "tsg_total": 136,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP407W": 4,
+        "TP407WF": 4
+      }
+    },
+    {
+      "floor": "L4",
+      "zone": 408,
+      "capacity_v1": 72,
+      "tsg_codes": {
+        "TP408": 72
+      },
+      "tsg_total": 72,
+      "match": true
+    },
+    {
+      "floor": "L4",
+      "zone": 409,
+      "capacity_v1": 134,
+      "tsg_codes": {
+        "TP409": 134
+      },
+      "tsg_total": 134,
+      "match": true
+    },
+    {
+      "floor": "L4",
+      "zone": 410,
+      "capacity_v1": 72,
+      "tsg_codes": {
+        "TP410": 72
+      },
+      "tsg_total": 72,
+      "match": true
+    },
+    {
+      "floor": "L4",
+      "zone": 411,
+      "capacity_v1": 144,
+      "tsg_codes": {
+        "TP411": 136
+      },
+      "tsg_total": 136,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP411W": 4,
+        "TP411WF": 4
+      }
+    },
+    {
+      "floor": "L4",
+      "zone": 412,
+      "capacity_v1": 144,
+      "tsg_codes": {
+        "TP412": 136
+      },
+      "tsg_total": 136,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP412W": 4,
+        "TP412WF": 4
+      }
+    },
+    {
+      "floor": "L4",
+      "zone": 413,
+      "capacity_v1": 150,
+      "tsg_codes": {
+        "TP413": 150
+      },
+      "tsg_total": 150,
+      "match": true
+    },
+    {
+      "floor": "L4",
+      "zone": 414,
+      "capacity_v1": 149,
+      "tsg_codes": {
+        "TP414": 141
+      },
+      "tsg_total": 141,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP414W": 4,
+        "TP414WF": 4
+      }
+    },
+    {
+      "floor": "L4",
+      "zone": 415,
+      "capacity_v1": 160,
+      "tsg_codes": {
+        "TP415": 152
+      },
+      "tsg_total": 152,
+      "match": false,
+      "diff": -8,
+      "tsg_wheelchair": {
+        "TP415W": 4,
+        "TP415WF": 4
+      }
+    },
+    {
+      "floor": "L4",
+      "zone": 416,
+      "capacity_v1": 171,
+      "tsg_codes": {
+        "TP416": 171
+      },
+      "tsg_total": 171,
+      "match": true
+    },
+    {
+      "floor": "L4",
+      "zone": 417,
+      "capacity_v1": 101,
+      "tsg_codes": {
+        "TP417": 101
+      },
+      "tsg_total": 101,
+      "match": true
+    },
+    {
+      "floor": "L5",
+      "zone": 503,
+      "capacity_v1": 115,
+      "tsg_codes": {
+        "TP503": 115
+      },
+      "tsg_total": 115,
+      "match": true
+    },
+    {
+      "floor": "L5",
+      "zone": 504,
+      "capacity_v1": 266,
+      "tsg_codes": {
+        "TP504": 266
+      },
+      "tsg_total": 266,
+      "match": true
+    },
+    {
+      "floor": "L5",
+      "zone": 505,
+      "capacity_v1": 351,
+      "tsg_codes": {
+        "TP505": 351
+      },
+      "tsg_total": 351,
+      "match": true
+    },
+    {
+      "floor": "L5",
+      "zone": 506,
+      "capacity_v1": 429,
+      "tsg_codes": {
+        "TP506": 429
+      },
+      "tsg_total": 429,
+      "match": true
+    },
+    {
+      "floor": "L5",
+      "zone": 507,
+      "capacity_v1": 494,
+      "tsg_codes": {
+        "TP507": 494
+      },
+      "tsg_total": 494,
+      "match": true
+    },
+    {
+      "floor": "L5",
+      "zone": 508,
+      "capacity_v1": 474,
+      "tsg_codes": {
+        "TP508": 474
+      },
+      "tsg_total": 474,
+      "match": true
+    },
+    {
+      "floor": "L5",
+      "zone": 509,
+      "capacity_v1": 591,
+      "tsg_codes": {
+        "TP509": 591
+      },
+      "tsg_total": 591,
+      "match": true
+    },
+    {
+      "floor": "L5",
+      "zone": 510,
+      "capacity_v1": 474,
+      "tsg_codes": {
+        "TP510": 474
+      },
+      "tsg_total": 474,
+      "match": true
+    },
+    {
+      "floor": "L5",
+      "zone": 511,
+      "capacity_v1": 494,
+      "tsg_codes": {
+        "TP511": 494
+      },
+      "tsg_total": 494,
+      "match": true
+    },
+    {
+      "floor": "L5",
+      "zone": 512,
+      "capacity_v1": 429,
+      "tsg_codes": {
+        "TP512": 429
+      },
+      "tsg_total": 429,
+      "match": true
+    },
+    {
+      "floor": "L5",
+      "zone": 513,
+      "capacity_v1": 351,
+      "tsg_codes": {
+        "TP513": 351
+      },
+      "tsg_total": 351,
+      "match": true
+    },
+    {
+      "floor": "L5",
+      "zone": 514,
+      "capacity_v1": 266,
+      "tsg_codes": {
+        "TP514": 266
+      },
+      "tsg_total": 266,
+      "match": true
+    },
+    {
+      "floor": "L5",
+      "zone": 515,
+      "capacity_v1": 115,
+      "tsg_codes": {
+        "TP515": 115
+      },
+      "tsg_total": 115,
+      "match": true
+    }
+  ],
+  "tsg_only_zones_not_in_v1": [
+    {
+      "code": "TP143",
+      "name": "魔王席143區",
+      "seatCount": 185
+    },
+    {
+      "code": "TP3FB",
+      "name": "L3 一壘貴賓席",
+      "seatCount": 1000
+    },
+    {
+      "code": "TP3SB",
+      "name": "L3 內野貴賓席",
+      "seatCount": 300
+    },
+    {
+      "code": "TP3TB",
+      "name": "L3 三壘貴賓席",
+      "seatCount": 1000
+    },
+    {
+      "code": "TP2SB",
+      "name": "L2 外野貴賓席",
+      "seatCount": 50
+    }
+  ]
+}
