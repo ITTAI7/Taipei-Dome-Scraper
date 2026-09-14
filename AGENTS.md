@@ -10,12 +10,9 @@
 - 各球隊若有特定的 Headers (`referer`) 要求、不同的正則表達式解析規則，或是座位圖 (Image Map) 的特殊行為，都請寫在各自的模組中，落實「模組化切割」。台鋼雄鷹則有自己專屬的 API headers (如 `x-company-code`)。
 
 ## 3. 開發及測試流程
-- 當正在針對特定球隊 (例如台鋼雄鷹或味全龍) 進行測試與開發時，請專注於該隊的特殊情境，利用該隊的測試檔 (如 `test_tsg.ts` 或 `test_weichuan.ts`) 進行驗證。遇到阻礙時，以該隊伍的解決方案優先。
+- 當正在針對特定球隊進行測試與開發時，請專注於該隊的特殊情境。專案根目錄的 `test_*.ts`（如 `test_rakuten_scraper.ts`、`test_uni_scraper.ts`、`test_allstar_only.ts`）是直接呼叫對應 Scraper 類別的驗證腳本，可用 `npx tsx test_xxx.ts` 執行。遇到阻礙時，以該隊伍的解決方案優先。
 
 ## 4. 台鋼雄鷹 (TSG) 專屬開發提示
-- **總票數動態設定**：由於台鋼的比賽場地較為多樣，在前端介面處理時，必須根據「場地名稱」來動態給予合理的「全場預設總票數」，以確保「已售出人數」及資源配置計算準確。若使用者沒有手動修改，請依照以下預設值帶入：
-  - **澄清湖棒球場**：預設為 20,000
-  - **嘉義市立棒球場**：預設為 10,000
-  - **臺北大巨蛋**：預設為 37,000
-  - **其它球場**：預設為 37,000
-- **獨立售票 API 架構**：台鋼使用新零售平台，所以爬蟲不需要使用 cheerio 分析 HTML，而是直接介接 JSON API (如 `spotlight`、`seat-availability`)。且必須在 Header 加入特定參數 (如 `x-company-code: tsghawks`) 才能正常發送請求。
+- **不要用預設值猜總票數**：台鋼**不需要**、也**不應該**再用「依場地名稱帶入固定總票數（例：大巨蛋 37,000）」這種猜測式做法——這是舊版設計，已經拿掉。現行做法是 `getTickets()` 平行呼叫兩支官方 API：`seat-availability` 取得每分區真實剩餘票數，`activity-venues` 取得每分區真實座位容量（`seatCount`，連前/後拆分區、輪椅席、貴賓包廂都各自有獨立數字），兩邊用 `code` 對起來直接算出已售，不需要也不應該回頭改用猜測值。
+- **`ignoreTag` 才是「此場次是否開放銷售」的旗標**：`activity-venues` 回傳的 `ignoreTag` 欄位是每場比賽各自獨立控制的（同一分區在不同場次會不一樣），`ignoreTag: true` 代表該分區這場比賽尚未開放銷售，此時 `seat-availability` 的 `availableSeats` 不可信，不能拿來計算已售/未售，必須排除在總計之外。
+- **獨立售票 API 架構**：台鋼使用新零售平台，所以爬蟲不需要使用 cheerio 分析 HTML，而是直接介接 JSON API：`ticket-platform.newretail.tw`（`spotlight`、`seat-availability`）與 `ticket-info.newretail.tw`（`activity-venues`，注意是**不同主機**）。所有請求都必須在 Header 加入 `x-company-code: tsghawks` 才能正常發送。
