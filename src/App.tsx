@@ -315,17 +315,19 @@ export default function App() {
       let sold = -1;
       if (typeof row.sold === 'number' && row.sold >= 0) {
          sold = row.sold;
-      } else if (total > 0) {
+      } else if (total > 0 && unsold >= 0) {
          sold = total - unsold;
       }
-      
+
+      // 未售出/已售出在資料不可信時（例如尚未開放銷售）保持空白，避免誤導成有效數字。
+      let unsoldStr = unsold >= 0 ? unsold.toString() : "";
       let soldStr = sold >= 0 ? sold.toString() : "";
       let errorStr = (row as any).error ? `"${(row as any).error}"` : "";
       if (includeSeatCount) {
         const totalStr = total >= 0 ? total.toString() : "";
-        csvContent += `${zoneName},${totalStr},${unsold},${soldStr},${errorStr}\n`;
+        csvContent += `${zoneName},${totalStr},${unsoldStr},${soldStr},${errorStr}\n`;
       } else {
-        csvContent += `${zoneName},${unsold},${soldStr},${errorStr}\n`;
+        csvContent += `${zoneName},${unsoldStr},${soldStr},${errorStr}\n`;
       }
     });
 
