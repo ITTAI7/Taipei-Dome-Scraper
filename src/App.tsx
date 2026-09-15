@@ -300,7 +300,14 @@ export default function App() {
     
     let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // \uFEFF for BOM (Excel UTF-8 support)
     
-    csvContent += "區域,未售出票數,已售出票數,備註\n";
+    // 台鋼的售票平台會回傳每個分區真實的座位數（seatCount），
+    // 是可拿來人工校正 大巨蛋座位表.json 的權威資料，因此多加一欄「座位數」；
+    // 其他球團無此資料，維持原本欄位以免顯示一堆空白/未知值。
+    const includeSeatCount = activeTeam === 'tsg';
+
+    csvContent += includeSeatCount
+      ? "區域,座位數,未售出票數,已售出票數,備註\n"
+      : "區域,未售出票數,已售出票數,備註\n";
     ticketData.details.forEach(row => {
       const zoneName = row.zone.includes(',') ? `"${row.zone}"` : row.zone;
       const total = typeof row.total === 'number' ? row.total : -1;
@@ -314,11 +321,21 @@ export default function App() {
       
       let soldStr = sold >= 0 ? sold.toString() : "";
       let errorStr = (row as any).error ? `"${(row as any).error}"` : "";
-      csvContent += `${zoneName},${unsold},${soldStr},${errorStr}\n`;
+      if (includeSeatCount) {
+        const totalStr = total >= 0 ? total.toString() : "";
+        csvContent += `${zoneName},${totalStr},${unsold},${soldStr},${errorStr}\n`;
+      } else {
+        csvContent += `${zoneName},${unsold},${soldStr},${errorStr}\n`;
+      }
     });
 
     const globalSold = ticketData.total_sold ?? 0;
-    csvContent += `總計,${ticketData.total_unsold},${globalSold}\n`;
+    if (includeSeatCount) {
+      const globalCapacity = ticketData.total_capacity ?? '';
+      csvContent += `總計,${globalCapacity},${ticketData.total_unsold},${globalSold}\n`;
+    } else {
+      csvContent += `總計,${ticketData.total_unsold},${globalSold}\n`;
+    }
     
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");

@@ -123,8 +123,9 @@ export class TsgScraper implements ITicketScraper {
             }
             if (info.ignoreTag) {
                 // 此場次尚未開放銷售：availableSeats 對關閉的分區不可信，
-                // 不計算已售/未售，也不計入總計。
-                details.push({ zone: zoneName, unsold: -1, sold: -1, total: -1, error: '此場次尚未開放銷售' });
+                // 不計算已售/未售。但座位數（seatCount）是場館固定配置、不受
+                // 開賣與否影響，屬於權威資料，仍要寫入 total 供人工校正座位表使用。
+                details.push({ zone: zoneName, unsold: -1, sold: -1, total: info.seatCount, error: '此場次尚未開放銷售' });
                 return;
             }
             const unsold = zone.availableSeats || 0;
@@ -142,12 +143,10 @@ export class TsgScraper implements ITicketScraper {
     let total_capacity = 0;
     details.forEach(d => {
         if (d.unsold >= 0) total_unsold += d.unsold;
-        if (d.sold !== undefined && d.sold >= 0) {
-            total_sold += d.sold;
-            total_capacity += (d.unsold >= 0 ? d.unsold : 0) + d.sold;
-        } else if (d.unsold >= 0) {
-            total_capacity += d.unsold;
-        }
+        if (d.sold !== undefined && d.sold >= 0) total_sold += d.sold;
+        // 座位數總計採用場館座位數（total），不受分區是否開賣影響，
+        // 才能跟每區座位數的加總對得起來，供人工校正座位表使用。
+        if (typeof d.total === 'number' && d.total >= 0) total_capacity += d.total;
     });
 
     console.log(`Found ${details.length} ticket zones. Total unsold: ${total_unsold}, total sold: ${total_sold}`);
