@@ -509,3 +509,30 @@ details.push({ zone: zoneName, unsold: -1, sold: -1, total: -1, error: '此場�
 
 - **欄位名稱不能用來猜功能**，`ignoreTag` 字面上看起來像「忽略某個標籤／畫面顯示用」，實際上是銷售開關；真正該做的是像這次一樣，拿同一份資料源「跨場次比對」找出哪些欄位會隨場次變動（動態、跟銷售狀態有關）、哪些欄位固定不變（靜態、場館配置）。
 - **不能拿不確定可信度的欄位去驗證另一個欄位**——前一篇就是拿本身可能不可信的 `availableSeats` 去驗證 `ignoreTag`，兩個都是「猜」，互相驗證不出真相。真正的答案來自使用者實際操作網頁介面的真實回饋（「此區域不開放」的文字），這是任何 API 資料比對都無法取代的。
+
+---
+
+## 2026-09-15：台鋼 CSV 明細加入「座位數」欄位，並確認 `seatCount` 是網站寫死的真實資料、非推算值
+
+### 背景
+
+使用者發現台鋼的售票網站能拿到大巨蛋各區真實的座位總數、已售/未售票數，認為這份明細很有參考價值，可以拿來人工校正 `大巨蛋座位.json`（v1）。要求把「下載各區售票明細 CSV」的功能加上座位數欄位。
+
+### 這次牽涉的三個問題點都跟 `ignoreTag`（尚未開放銷售）的分區有關
+
+1. **CSV 新增「座位數」欄位**（[App.tsx](src/App.tsx) `handleExport`）：格式從 `區域,未售出票數,已售出票數,備註` 改成 `區域,座位數,未售出票數,已售出票數,備註`。**只有台鋼**（`activeTeam === 'tsg'`）會多這一欄，其他球團（utiki 三隊、ibon 三隊）沒有這麼權威的座位數資料來源，維持原本 4 欄格式，避免顯示一堆空白。座位數直接讀 `TicketZone.total`，本來就存在（[TsgScraper.ts](src/services/scrapers/TsgScraper.ts) 裡塞的就是 `activity-venues` API 的 `seatCount`），只是原本沒輸出到 CSV。
+
+2. **`ignoreTag: true`（尚未開放銷售）的分區，`total` 原本也被寫成 `-1`**：因為前一篇（`ignoreTag` 才是真正的銷售旗標）修復時，把整個分區的 `unsold`/`sold`/`total` 一起標記成 `-1`（未知）。但 `seatCount` 是**場館固定配置**，跟這場比賽有沒有開賣完全無關（已在前一篇驗證過：同場館不同場次 `seatCount` 逐一比對一致）。所以改成只有 `unsold`/`sold` 維持 `-1`，`total` 照樣填入真實的 `info.seatCount`（[TsgScraper.ts:124-129](src/services/scrapers/TsgScraper.ts#L124-L129)）。連帶把 `total_capacity` 的加總邏輯（[TsgScraper.ts:140-147](src/services/scrapers/TsgScraper.ts#L140-L147)）從「靠 `unsold+sold` 反推」改成「直接加總每區的 `total`」，這樣未開賣分區的座位數才會被算進 CSV 總計列的座位數，跟各區加總對得起來。
+
+3. **CSV 對未開賣分區的未售/已售數字有誤導性 bug**：使用者截圖發現，`此場次尚未開放銷售` 的分區在 CSV 裡，「未售出票數」欄位直接印出 `-1`，「已售出票數」欄位卻顯示一個很奇怪的正數（例如座位數 60、已售出卻寫 61）。追查發現是 [App.tsx](src/App.tsx) 舊邏輯 `sold = total - unsold`，當 `unsold` 是 `-1`（未知，不是真的 0）時算成 `total - (-1) = total + 1`，把「不可信」的佔位值當成真數字去運算，湊出一個看似合理、實則完全錯誤的已售票數。已售出票數欄位這樣的誤導性極大——`-1` 看起來像資料異常會有警覺，但 `total+1` 看起來就是個普通數字，容易被誤讀成真實已售票數。修法：`unsold`/`sold` 只要是負值就輸出空白字串，不印出 `-1` 也不拿去做運算；只有座位數欄位維持顯示真實數字。
+
+### 最後確認：`seatCount` 是不是我們推算出來的？
+
+使用者最後要求做一次確認：台鋼的座位容量是不是網站/API 直接給的資料，而不是我們程式自己算出來的。
+
+直接對正式環境的兩支 API 各打一次驗證（`node -e "fetch(...)"`）：
+1. `GET .../api/v1/public/spotlight` 抓一場大巨蛋的 `activityId`/`eventSessionId`。
+2. `GET ticket-info.newretail.tw/api/v1/activity-venues/{AV_xxx}?...` 直接印出原始回應的前三筆，確認 `seatCount` 欄位本來就在裡面（例：B1 102區 189、B1 103區 576、B1 104區 724），伺服器端直接回傳的數字。
+3. 對照 [TsgScraper.ts:36-38](src/services/scrapers/TsgScraper.ts#L36-L38)：`fetchSeatCapacityMap()` 只是把 `z.seatCount` 原封不動存進 `Map`，後面寫進 CSV 的 `total` 也只是這個值本身，中間沒有任何加總、拆分、或用樓層/分區號回推的計算邏輯。
+
+**結論：台鋼的座位數是網站/API 寫死的權威資料，不是推算值**，可以放心拿來人工校正 `大巨蛋座位.json`。

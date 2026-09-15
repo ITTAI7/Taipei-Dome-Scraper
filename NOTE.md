@@ -59,7 +59,8 @@
 - `activity-venues` 的 id 規則：直接把 `activityId` 的 `AC_` 前綴換成 `AV_`（例：`AC_260729TP2888` → `AV_260729TP2888`），不需要另外查。已驗證同一場館在不同場次之間 `seatCount`完全一致，是場館固定配置、不是每場重新計算。
 - 兩支 API 都要帶 `x-company-code: tsghawks` header，否則回 400。
 - 沒有座位圖二階段抓取（不需要，因為容量是查表拿到的，不是靠數座位格子）。
-- **`activity-venues` 回應裡的 `ignoreTag` 欄位＝「這一區這一場有沒有開放銷售」**，跟 `seatCount` 不同，是每場比賽各自變動的（同一分區在不同場次之間 `ignoreTag` 會不一樣，親自跨場次比對過），不是場館固定屬性。`ignoreTag: true` 的分區在網頁上點下去會顯示「此區域不開放」，這種分區的 `seat-availability` 回傳的 `availableSeats` **不可信**（可能被系統歸零/鎖住，不是真實成交數字），`TsgScraper.ts` 會把這種分區的 `unsold`/`sold`/`total` 全部標記為 `-1`（未知，附 `error: "此場次尚未開放銷售"`），完全不計入總計。只有 `ignoreTag: false` 的分區才會正常計算已售/未售。
+- **`activity-venues` 回應裡的 `ignoreTag` 欄位＝「這一區這一場有沒有開放銷售」**，跟 `seatCount` 不同，是每場比賽各自變動的（同一分區在不同場次之間 `ignoreTag` 會不一樣，親自跨場次比對過），不是場館固定屬性。`ignoreTag: true` 的分區在網頁上點下去會顯示「此區域不開放」，這種分區的 `seat-availability` 回傳的 `availableSeats` **不可信**（可能被系統歸零/鎖住，不是真實成交數字），`TsgScraper.ts` 會把這種分區的 `unsold`/`sold` 標記為 `-1`（未知，附 `error: "此場次尚未開放銷售"`），不計入 `total_unsold`/`total_sold` 總計。**但 `total`（座位數）照樣填入真實的 `seatCount`**——座位數是場館固定配置，跟這場有沒有開賣無關，`total_capacity` 也是直接加總每區的 `total` 算出來的，不受 `ignoreTag` 影響。只有 `ignoreTag: false` 的分區才會正常計算已售/未售。
+- **CSV 匯出（`App.tsx` `handleExport`）只有台鋼會多一欄「座位數」**（`區域,座位數,未售出票數,已售出票數,備註`），因為只有台鋼有這麼權威的座位數來源。已驗證過 `seatCount` 是 API 直接回傳的欄位、不是程式推算出來的（2026-09-15，見 `DEVLOG.md`）。未開賣分區（`unsold`/`sold` 為 `-1`）在 CSV 裡會顯示空白，不會印出 `-1`、也不會拿 `-1` 去做 `total - unsold` 這種運算湊出一個看似正常實則錯誤的數字。
 
 ---
 
