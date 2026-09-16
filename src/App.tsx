@@ -300,15 +300,26 @@ export default function App() {
     
     let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // \uFEFF for BOM (Excel UTF-8 support)
     
-    // 台鋼的售票平台會回傳每個分區真實的座位數（seatCount），
-    // 是可拿來人工校正 大巨蛋座位表.json 的權威資料，因此多加一欄「座位數」；
-    // 其他球團無此資料，維持原本欄位以免顯示一堆空白/未知值。
-    const includeSeatCount = activeTeam === 'tsg';
+    // 台鋼的售票平台會回傳每個分區真實的座位數（seatCount），是最準確的權威資料
+    // （見 大巨蛋座位v3.json），因此多加一欄「座位數」；中信兄弟已改用 v3 容量表
+    // 回填缺值分區的 total，故一併加入。其餘球團尚未接上容量表，維持原本欄位
+    // 以免顯示一堆空白/未知值。
+    const includeSeatCount = activeTeam === 'tsg' || activeTeam === 'brothers';
 
     csvContent += includeSeatCount
       ? "區域,座位數,未售出票數,已售出票數,備註\n"
       : "區域,未售出票數,已售出票數,備註\n";
-    ticketData.details.forEach(row => {
+
+    // 依分區代碼（如「105區」「208區」的數字部分）由小到大排序，方便閱讀；
+    // 抓不到代碼的分區（理論上不會發生）排到最後，同代碼的前/後排、輪椅席等
+    // 保留原本抓取順序（sort 為 stable sort）。
+    const extractZoneNum = (zoneName: string): number => {
+      const m = zoneName.match(/(\d+)\s*區/);
+      return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER;
+    };
+    const sortedDetails = [...ticketData.details].sort((a, b) => extractZoneNum(a.zone) - extractZoneNum(b.zone));
+
+    sortedDetails.forEach(row => {
       const zoneName = row.zone.includes(',') ? `"${row.zone}"` : row.zone;
       const total = typeof row.total === 'number' ? row.total : -1;
       const unsold = row.unsold;
@@ -373,7 +384,7 @@ export default function App() {
         {/* Header */}
         <header className={`p-4 sticky top-0 z-10 flex items-center justify-center gap-2 transition-colors ${activeTeam === 'brothers' ? 'bg-yellow-400 border-b border-yellow-500' : activeTeam === 'weichuan' ? 'bg-red-600 outline-none border-b border-red-700' : activeTeam === 'tsg' ? 'bg-[#00604A] border-b border-[#004A3A]' : activeTeam === 'rakuten' ? 'bg-[#BE1E2D] border-b border-[#9E1824]' : activeTeam === 'uni' ? 'bg-[#EC6A1A] border-b border-[#C55A16]' : activeTeam === 'allstar' ? 'bg-[#D4AF37] border-b border-[#B8960F]' : 'bg-[#004A9C] border-b border-[#003875]'}`}>
           <Ticket className={`w-6 h-6 ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`} />
-          <h1 className={`text-xl font-bold tracking-tight ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`}>大巨蛋售票極速查詢 v0.9</h1>
+          <h1 className={`text-xl font-bold tracking-tight ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`}>大巨蛋售票極速查詢 v0.91</h1>
         </header>
         
         {/* Main Content */}

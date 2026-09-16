@@ -1,9 +1,11 @@
 import { ITicketScraper, GameLink, TicketInfo, TicketZone } from './ITicketScraper.js';
 import * as cheerio from 'cheerio';
 import { localSafeFetch } from './localFetch.js';
+import { loadSeatCapacityMap, patchDomeCapacity, DOME_SEAT_MAP_V3_FILE } from './domeSeatMap.js';
 
 export class BrothersScraper implements ITicketScraper {
   private baseUrl = 'https://tix.ctbcsports.com/BROTHERS/';
+  private domeSeatMap = loadSeatCapacityMap(DOME_SEAT_MAP_V3_FILE);
 
   async getGames(): Promise<GameLink[]> {
     console.log('Fetching games via pure HTTP...');
@@ -333,6 +335,8 @@ export class BrothersScraper implements ITicketScraper {
         await new Promise(r => setTimeout(r, 1200)); // sleep to avoid firing too fast
     }
     
+    patchDomeCapacity(details, this.domeSeatMap);
+
     let sum_sold = 0;
     let sum_capacity = 0;
     details.forEach(z => {

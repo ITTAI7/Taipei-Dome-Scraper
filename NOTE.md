@@ -43,6 +43,7 @@
 - **味全龍需要登入**：因為味全龍的訂票系統對某些場次要求會員登入才能看到座位圖，所以 `WeiChuanScraper` 多了一個 `sessionToken` 機制——`server.ts` 提供 `/api/weichuan/captcha`（抓驗證碼圖片）和 `/api/weichuan/login`（帳密+驗證碼登入），登入成功後把 cookie 存進 `WeiChuanScraper.cookieStore`（一個記憶體內的 `Map`，正式環境應該換成 Redis），前端再把 `sessionToken` 帶入 `getTickets` 的 URL 查詢參數。沒有這個 token 就會丟 `UNAUTHORIZED_NO_SESSION`。
 - 輪椅席（`輪椅`/`陪伴`關鍵字）通常沒有獨立座位圖連結，會標記 `error: "無座位圖連結(無法計算)"`，不計入熱區抓取。
 - 抓分區用 5 併發（`concurrency = 5`），每批之間 sleep 1.2 秒，避免打太快被擋；連續遇到 WAF 就直接跳出迴圈放棄剩下的分區。
+- **中信兄弟已接上 `大巨蛋座位v3.json` 容量表回填缺值分區**（2026-09-16，`src/services/scrapers/domeSeatMap.ts` 的 `loadSeatCapacityMap` / `patchDomeCapacity`）。⚠️ 一開始誤以為兄弟隊分區不會拆前/後排，實測 `test_brothers_scraper.ts` 才發現**兄弟其實會拆**（`B1內野105/106/107/108/109/110/112/113/114/116/117/118/119/120/121區` 都拆成「前排」「後排」兩列分開賣，跟台鋼的拆法還不完全一樣——台鋼只拆 106~120 之間 13 區，105、121 這兩區台鋼沒拆但兄弟拆了）。所以改用跟 ibon 三隊 `patchDomeCapacity()` 相同的「同區歸戶」策略：用 `extractFloorZone()` 把同一 floor-zoneNum 的所有列（不管有沒有拆前/後）分組，只有「組內至少一列已有真實資料」時才把整區容量扣掉已知部分、剩餘塞給未知那列；如果整組全部抓失敗，只有「這區本來就沒拆、只有一列」時才直接用整區容量回填，有拆前/後但兩列都失敗則兩列都維持未知（不亂猜怎麼分配）。輪椅／陪伴席容量表沒有涵蓋，略過不補。味全龍／富邦目前**尚未**接上，理由同 `AGENTS.md` 的隔離修改原則——先在有實際場次可驗證的兄弟隊上線，之後才考慮擴到其他隊。
 
 ---
 
@@ -60,7 +61,7 @@
 - 兩支 API 都要帶 `x-company-code: tsghawks` header，否則回 400。
 - 沒有座位圖二階段抓取（不需要，因為容量是查表拿到的，不是靠數座位格子）。
 - **`activity-venues` 回應裡的 `ignoreTag` 欄位＝「這一區這一場有沒有開放銷售」**，跟 `seatCount` 不同，是每場比賽各自變動的（同一分區在不同場次之間 `ignoreTag` 會不一樣，親自跨場次比對過），不是場館固定屬性。`ignoreTag: true` 的分區在網頁上點下去會顯示「此區域不開放」，這種分區的 `seat-availability` 回傳的 `availableSeats` **不可信**（可能被系統歸零/鎖住，不是真實成交數字），`TsgScraper.ts` 會把這種分區的 `unsold`/`sold` 標記為 `-1`（未知，附 `error: "此場次尚未開放銷售"`），不計入 `total_unsold`/`total_sold` 總計。**但 `total`（座位數）照樣填入真實的 `seatCount`**——座位數是場館固定配置，跟這場有沒有開賣無關，`total_capacity` 也是直接加總每區的 `total` 算出來的，不受 `ignoreTag` 影響。只有 `ignoreTag: false` 的分區才會正常計算已售/未售。
-- **CSV 匯出（`App.tsx` `handleExport`）只有台鋼會多一欄「座位數」**（`區域,座位數,未售出票數,已售出票數,備註`），因為只有台鋼有這麼權威的座位數來源。已驗證過 `seatCount` 是 API 直接回傳的欄位、不是程式推算出來的（2026-09-15，見 `DEVLOG.md`）。未開賣分區（`unsold`/`sold` 為 `-1`）在 CSV 裡會顯示空白，不會印出 `-1`、也不會拿 `-1` 去做 `total - unsold` 這種運算湊出一個看似正常實則錯誤的數字。
+- **CSV 匯出（`App.tsx` `handleExport`）台鋼跟中信兄弟會多一欄「座位數」**（`區域,座位數,未售出票數,已售出票數,備註`，`includeSeatCount = activeTeam === 'tsg' || activeTeam === 'brothers'`）。台鋼是因為有這麼權威的座位數來源，已驗證過 `seatCount` 是 API 直接回傳的欄位、不是程式推算出來的（2026-09-15，見 `DEVLOG.md`）；中信兄弟則是 2026-09-16 起改用 `大巨蛋座位v3.json`（見上面 utiki 三隊段落）補齊缺值分區的 `total`。其餘球團（味全龍、富邦、ibon 三隊）尚未接上權威容量來源，維持原本 4 欄格式。未開賣或未知分區的未售/已售欄位在 CSV 裡會顯示空白，不會印出 `-1`、也不會拿 `-1` 去做 `total - unsold` 這種運算湊出一個看似正常實則錯誤的數字。
 
 ---
 
