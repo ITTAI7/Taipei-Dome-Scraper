@@ -244,11 +244,13 @@ export class WeiChuanScraper implements ITicketScraper {
           if(m) {
               const tUrl = `UTK0205_?PERFORMANCE_ID=${m[1]}&GROUP_ID=${m[3]}&PERFORMANCE_PRICE_AREA_ID=${m[2]}`;
               
-              let baseUnsold = 0;
+              // 「熱賣中」等非數字狀態在讀到座位圖前剩餘數是未知（-1），不要先填 0：
+              // 若之後座位圖讀不到（WAF 中斷、解析失敗），0 會被當成「剩 0 張」。
+              let baseUnsold = -1;
               if (/^\d+$/.test(status)) {
                   baseUnsold = parseInt(status, 10);
               }
-              
+
               hotZones.push({index: details.length, name: zoneName, url: tUrl});
               
               // If we are queuing it, we will override from the map page!
@@ -309,13 +311,16 @@ export class WeiChuanScraper implements ITicketScraper {
                                    }
                                }
                            } else {
+                               // 既無 DOM 也無 seatStr：這區實際賣況未知。維持未知，
+                               // 不要寫 sold=0（會變成看似真實的 0/0，見 DEVLOG 2026-06-26 路徑 3）。
                                unsold = details[tz.index].unsold;
-                               sold = 0;
+                               sold = -1;
+                               details[tz.index].error = "座位圖解析失敗";
                            }
                        }
                        const total = sold !== -1 ? unsold + sold : -1;
-            
-                       total_unsold += unsold;
+
+                       if (unsold >= 0) total_unsold += unsold;
             
                        details[tz.index].unsold = unsold;
                        details[tz.index].sold = sold;
@@ -343,8 +348,8 @@ export class WeiChuanScraper implements ITicketScraper {
         if (z.sold !== undefined && z.sold >= 0) {
             sum_sold += z.sold;
             sum_capacity += ((z.unsold || 0) + z.sold);
-        } else {
-            sum_capacity += (z.unsold || 0);
+        } else if (z.unsold > 0) {
+            sum_capacity += z.unsold;
         }
     });
 

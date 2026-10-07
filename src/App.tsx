@@ -94,7 +94,7 @@ export default function App() {
   };
 
   const addRule = () => {
-    const newId = Math.random().toString(36).substr(2, 9);
+    const newId = Math.random().toString(36).slice(2, 11);
     setStaffRules(prev => {
       // Find the last rule that might be -1
       const lastRule = prev[prev.length - 1];

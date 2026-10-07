@@ -38,7 +38,7 @@
 - **完售 ≠ 抓不到數字**：完售時能不能算出精確數字，關鍵在於 HTML 裡的購票連結（`onclick`/`href`/`rel`）有沒有被移除：
   - 連結還在 → 能透過 `seatStr` fallback 精確算出已售/總容量 ✅
   - 連結被清除 → 該區數據直接遺失（`sold=-1, total=-1`）❌
-  - 連結還在但頁面既無 DOM 也無 `seatStr` → 會誤判成 0/0，完全失真 ⚠️
+  - 連結還在但頁面既無 DOM 也無 `seatStr` → 以前會誤判成 0/0；2026-10-07 起三隊都改成維持未知（`sold=-1, total=-1`，備註「座位圖解析失敗」），「熱賣中」這類非數字狀態的 `unsold` 也是 `-1`，不再先填 0（見 `DEVLOG.md` 2026-10-07）
   （詳細分析見 `DEVLOG.md` 2026-06-26 那篇）
 - **味全龍需要登入**：因為味全龍的訂票系統對某些場次要求會員登入才能看到座位圖，所以 `WeiChuanScraper` 多了一個 `sessionToken` 機制——`server.ts` 提供 `/api/weichuan/captcha`（抓驗證碼圖片）和 `/api/weichuan/login`（帳密+驗證碼登入），登入成功後把 cookie 存進 `WeiChuanScraper.cookieStore`（一個記憶體內的 `Map`，正式環境應該換成 Redis），前端再把 `sessionToken` 帶入 `getTickets` 的 URL 查詢參數。沒有這個 token 就會丟 `UNAUTHORIZED_NO_SESSION`。
 - 輪椅席（`輪椅`/`陪伴`關鍵字）通常沒有獨立座位圖連結，會標記 `error: "無座位圖連結(無法計算)"`，不計入熱區抓取。

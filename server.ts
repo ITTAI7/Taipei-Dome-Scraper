@@ -106,11 +106,9 @@ async function startServer() {
       }
       let cookieStr = WeiChuanScraper.cookieStore.get(sessionToken) || '';
       
+      // 不要 log RVT / JWT / Cookie：部署到雲端時 log 會進雲端日誌，等於把登入 session 外洩
       console.log('--- LOGIN ATTEMPT ---');
-      console.log('RVT:', _rvt);
-      console.log('JWT:', _jwt);
-      console.log('Cookie:', cookieStr);
-      
+
       const loginParams = new URLSearchParams();
       loginParams.append('ACCOUNT', username);
       loginParams.append('PASSWORD', password);
@@ -144,9 +142,8 @@ async function startServer() {
       }
       
       const text = await loginRes.text();
-      console.log('Login Status:', loginRes.status);
-      console.log('Login Set-Cookies:', newCookies);
-      console.log('Login Text:', text);
+      // 只記狀態碼與 Set-Cookie 數量；Cookie 值與回應本文（含 session 資訊）不寫進 log
+      console.log('Login Status:', loginRes.status, `(Set-Cookie x${newCookies.length})`);
       
       if (loginRes.status === 302 || loginRes.status === 301 || text.includes('UTK') || text.includes('location.href') || text.includes('location.reload') || text.includes('GoBack') || !text.includes('alert')) {
          // Update cookies with new session details
@@ -219,18 +216,19 @@ async function startServer() {
     }
     
     console.log(`[server] /api/get_tickets/${platform} 收到請求, url="${gameUrlStr}"`);
-    
+
     if (sessionToken && typeof sessionToken === 'string') {
         const u = new URL(gameUrlStr);
         u.searchParams.set('sessionToken', sessionToken);
         gameUrlStr = u.toString();
-        console.log(`[server] 已附加 sessionToken, 最終 url="${gameUrlStr}"`);
+        // 附加後的 url 含 sessionToken，不要整串印出來
+        console.log(`[server] 已附加 sessionToken`);
     }
-    
+
     // Check if client expects SSE
     const accept = req.headers.accept || '';
     if (accept.indexOf('text/event-stream') !== -1) {
-        console.log(`[SSE] Client connected for ${platform} tickets. url:`, gameUrlStr);
+        console.log(`[SSE] Client connected for ${platform} tickets.`);
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
@@ -240,7 +238,18 @@ async function startServer() {
         // Send initial padding so that reverse proxies (like nginx) which buffer up to 4KB flush the headers.
         res.write(':' + ' '.repeat(4096) + '\n\n');
 
+        // 使用者關掉分頁/重新查詢時，不要再重試或寫入已斷線的連線。
+        // 用 res 的 close（Node 16+ 的 req close 在請求本文讀完就會觸發，不代表斷線）。
+        let clientGone = false;
+        res.on('close', () => {
+            if (!res.writableEnded) {
+                clientGone = true;
+                console.log(`[SSE] Client disconnected before ${platform} scrape finished.`);
+            }
+        });
+
         const sendEvent = (type: string, data: any) => {
+            if (clientGone) return;
             console.log(`[SSE] Sending ${type} event:`, typeof data === 'object' ? JSON.stringify(data).substring(0, 50) + '...' : data);
             res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
             if (typeof (res as any).flush === 'function') {
@@ -254,6 +263,7 @@ async function startServer() {
         
         const runScrape = async () => {
             while (attempt < maxRetries) {
+              if (clientGone) return;
               try {
                 const scraper = ScraperFactory.getScraper(platform);
                 const ticketInfo = await scraper.getTickets(gameUrlStr, (msg) => {
@@ -266,7 +276,7 @@ async function startServer() {
                 attempt++;
                 const errStr = String(error);
                 console.error(`[SSE] Error during scrape attempt ${attempt}:`, error);
-                
+
                 if (errStr.includes("售票系統異常") && attempt < maxRetries) {
                    console.log(`Retrying get_tickets for ${platform}... (attempt ${attempt + 1})`);
                    sendEvent('progress', { message: `系統攔截，正進行第 ${attempt + 1} 次重試...` });

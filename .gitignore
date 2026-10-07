@@ -9,6 +9,9 @@ build/
 .env
 .env.local
 
+# 舊 Python 版留下的虛擬環境（現已改用 Node，不需要）
+.venv/
+
 # 作業系統產生的垃圾檔
 .DS_Store
 Thumbs.db
