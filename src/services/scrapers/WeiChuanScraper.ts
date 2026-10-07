@@ -173,7 +173,18 @@ export class WeiChuanScraper implements ITicketScraper {
 
     const pListHtml = await pListRes.text();
     let mPerf = pListHtml.match(/PERFORMANCE_ID=([A-Z0-9]+)/);
-    if(!mPerf) throw new Error("Could not find PERFORMANCE_ID on performance list API. Maybe login session expired?");
+    if(!mPerf) {
+        // 沒有購票連結通常代表這個階段還沒開放一般購票，不是登入失效或被擋。
+        // 例：2026-10-07 台灣大賽「狂龍軍會員優先訂購」期間，#buy_btn 是
+        // VipSellCheck('...')（要先通過會員資格驗證），而不是 PERFORMANCE_ID 連結；
+        // 非會員帳號會被站方回「您不符合該階段優先購買資格」。
+        const $pList = cheerio.load(pListHtml);
+        const buyBtnText = $pList('#buy_btn').text().trim();
+        if (buyBtnText) {
+            throw new Error(`⏳ 此場次目前尚未開放一般購票：${buyBtnText}`);
+        }
+        throw new Error("Could not find PERFORMANCE_ID on performance list API. Maybe login session expired?");
+    }
     const performanceId = mPerf[1];
 
     const r3 = await fetchHtml(`UTK0204_?PERFORMANCE_ID=${performanceId}&PRODUCT_ID=${uProductId}`, this.baseUrl + `UTK0201_?PRODUCT_ID=${uProductId}&STARTDATE=${uStartDate}`);

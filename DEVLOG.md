@@ -680,3 +680,26 @@ B1內野121區前排 / B1內野121區後排
 - 報告說「驗證碼路由也 log 了 RVT／JWT／Cookie」——實際上是登入路由，驗證碼路由沒有。
 - 報告說三隊的 `getTickets` 都包含 `patchDomeCapacity`——實際上只有中信兄弟有接。
 - 報告說斷線後 `res.write` 會 throw——Node 不會 throw，只是寫入無效。
+
+---
+
+## 2026-10-07（續）：味全龍台灣大賽實測——會員優先購買期間被誤顯示成「被 WAF 擋」
+
+### 背景
+
+味全打進台灣大賽，大巨蛋有 10/17、10/18、10/23、10/24、10/25 五場（`PRODUCT_ID=P1G9BHCY`）。使用者回報「現在有身分驗證，無法查」，並提供帳號讓 Claude 實測。
+
+### 查到的事
+
+- `PerformanceListControl` 回傳的 `#buy_btn` 是 `VipSellCheck('P1GKL1IE')`，按鈕文字「2026狂龍軍會員優先訂購》」，HTML 裡沒有任何 `PERFORMANCE_ID=` 連結。
+- 對照站方 `UTK0201.min.js`：`VipSellCheck(i)` 的參數 `i` 就是 `PERFORMANCE_ID`。流程是「需會員登入 → `POST UTK0201_/VIP_SELL_INFO` 檢查資格 → 通過才 `DoVIPLogin`」。
+- 不登入直接開 `UTK0204_?PERFORMANCE_ID=P1GKL1IE` → 頁面只有 `top.location.href = '/'`，被踢回首頁。
+- 用使用者帳號登入（驗證碼由 Claude 讀圖輸入）成功，但 `VIP_SELL_INFO` 回 `ACTION_ERROR: "很抱歉！您不符合該階段優先購買資格！"`，`AUTH_TIME: 2026/10/7 下午 11:59:00`（這一階段到當天 23:59 結束），`UTK0204_` 仍被踢回首頁。→ 帳號不是狂龍軍會員，這個階段本來就查不到，**不是程式問題**。
+
+### 修正
+
+原本 `WeiChuanScraper` 丟 `Could not find PERFORMANCE_ID ... Maybe login session expired?`，`server.ts` 看到 `PERFORMANCE_ID` 字樣又翻成「Blocked by WAF/Cloudflare or structure changed」，使用者會以為被擋。改成跟 `BrothersScraper` 一樣：沒有 `PERFORMANCE_ID` 但有 `#buy_btn` 文字時，丟「⏳ 此場次目前尚未開放一般購票：2026狂龍軍會員優先訂購》」。只改 `WeiChuanScraper.ts`。用同一個登入 session 實際重跑 10/17、10/18 兩場，訊息正確。
+
+### 尚未支援
+
+爬蟲不會自動走會員優先購買的資格驗證（`VIP_SELL_INFO` → `DoVIPLogin`）。會員階段要查，需要符合資格的帳號，再另外實作這段流程。一般販售開始後，按鈕應該會變回一般購票連結，屆時再實測「網站有異常情況」重試與 0/0 修正。
