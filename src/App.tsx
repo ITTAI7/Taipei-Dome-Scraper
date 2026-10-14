@@ -301,10 +301,10 @@ export default function App() {
     let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // \uFEFF for BOM (Excel UTF-8 support)
     
     // 台鋼的售票平台會回傳每個分區真實的座位數（seatCount），是最準確的權威資料
-    // （見 大巨蛋座位v3.json），因此多加一欄「座位數」；中信兄弟已改用 v3 容量表
+    // （見 大巨蛋座位v3.json），因此多加一欄「座位數」；中信兄弟、味全龍已改用 v3 容量表
     // 回填缺值分區的 total，故一併加入。其餘球團尚未接上容量表，維持原本欄位
     // 以免顯示一堆空白/未知值。
-    const includeSeatCount = activeTeam === 'tsg' || activeTeam === 'brothers';
+    const includeSeatCount = activeTeam === 'tsg' || activeTeam === 'brothers' || activeTeam === 'weichuan';
 
     csvContent += includeSeatCount
       ? "區域,座位數,未售出票數,已售出票數,備註\n"

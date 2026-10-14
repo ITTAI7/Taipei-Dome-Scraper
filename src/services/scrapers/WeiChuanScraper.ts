@@ -1,9 +1,11 @@
 import * as cheerio from 'cheerio';
 import { ITicketScraper, GameLink, TicketInfo, TicketZone } from './ITicketScraper.js';
 import { localSafeFetch } from './localFetch.js';
+import { loadSeatCapacityMap, patchDomeCapacity, DOME_SEAT_MAP_V3_FILE } from './domeSeatMap.js';
 
 export class WeiChuanScraper implements ITicketScraper {
   private baseUrl = 'https://tix.wdragons.com/';
+  private domeSeatMap = loadSeatCapacityMap(DOME_SEAT_MAP_V3_FILE);
 
   // To support session tokens, we can use a store. In a scalable app, this should be Redis.
   static cookieStore: Map<string, string> = new Map();
@@ -352,13 +354,20 @@ export class WeiChuanScraper implements ITicketScraper {
         }
         await new Promise(r => setTimeout(r, 1200)); // sleep to avoid firing too fast
     }
-    
+
+    // 座位圖讀不到的分區（WAF 中斷、完售後連結被拿掉）用 v3 容量表回填 total。
+    // 味全只在大巨蛋才有 v3 可用；非大巨蛋分區名稱對不到 v3，patchDomeCapacity 不會動。
+    patchDomeCapacity(details, this.domeSeatMap);
+
     let sum_sold = 0;
     let sum_capacity = 0;
     details.forEach(z => {
         if (z.sold !== undefined && z.sold >= 0) {
             sum_sold += z.sold;
             sum_capacity += ((z.unsold || 0) + z.sold);
+        } else if (typeof z.total === 'number' && z.total >= 0) {
+            // 剩餘數未知、但容量已由 patchDomeCapacity 從 v3 容量表回填
+            sum_capacity += z.total;
         } else if (z.unsold > 0) {
             sum_capacity += z.unsold;
         }

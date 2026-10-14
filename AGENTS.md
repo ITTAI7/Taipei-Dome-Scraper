@@ -16,3 +16,9 @@
 - **不要用預設值猜總票數**：台鋼**不需要**、也**不應該**再用「依場地名稱帶入固定總票數（例：大巨蛋 37,000）」這種猜測式做法——這是舊版設計，已經拿掉。現行做法是 `getTickets()` 平行呼叫兩支官方 API：`seat-availability` 取得每分區真實剩餘票數，`activity-venues` 取得每分區真實座位容量（`seatCount`，連前/後拆分區、輪椅席、貴賓包廂都各自有獨立數字），兩邊用 `code` 對起來直接算出已售，不需要也不應該回頭改用猜測值。
 - **`ignoreTag` 才是「此場次是否開放銷售」的旗標**：`activity-venues` 回傳的 `ignoreTag` 欄位是每場比賽各自獨立控制的（同一分區在不同場次會不一樣），`ignoreTag: true` 代表該分區這場比賽尚未開放銷售，此時 `seat-availability` 的 `availableSeats` 不可信，不能拿來計算已售/未售，必須排除在總計之外。
 - **獨立售票 API 架構**：台鋼使用新零售平台，所以爬蟲不需要使用 cheerio 分析 HTML，而是直接介接 JSON API：`ticket-platform.newretail.tw`（`spotlight`、`seat-availability`）與 `ticket-info.newretail.tw`（`activity-venues`，注意是**不同主機**）。所有請求都必須在 Header 加入 `x-company-code: tsghawks` 才能正常發送。
+
+## 5. 大巨蛋座位表 v3 要收錄所有分區
+- `大巨蛋座位v3.json` 的目標是收錄**大巨蛋原本規劃就有的所有分區**。任何球團開賣了 v3 沒有的分區（例：2026-10 味全開賣的 L3 內野 Lounge 區、L3 左/右外野 FamilyZone），都要補進 v3。
+- 用大巨蛋的樓層＋位置命名（例：`["L3", "左外野", null]`），不要用球團自己的票區品牌名。
+- 座位數只填有實測依據的數字（台鋼 `seatCount`、座位圖已售＋未售、開賣當下的剩餘張數）。查不到就填 `null`，之後量到再補，**不要填估計值**。來源寫在 `NOTE.md` 的 v3 段落。
+- v3 記的是**大巨蛋本身的座位數**，台鋼後台 `seatCount` 優先；台鋼沒有的分區才用其他球團的座位圖。各球團單場開賣跟台鋼差幾席屬於誤差範圍（球團可能保留或調整座位），**不要**因此改 v3 的數字。

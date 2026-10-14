@@ -8,9 +8,11 @@ import { TicketZone } from './ITicketScraper.js';
 // 詳見 大巨蛋座位v2.json 的 _說明 與 DEVLOG.md 2026-09-14 條目。
 // 樂天／統一／明星賽三隊目前仍各自讀 v1（大巨蛋座位.json），尚未切換到這份檔案，
 // 避免同時變動既有行為；新加入的球團（如中信兄弟）請直接用這裡的 v3 loader。
+// v3 的目標是收錄大巨蛋原本規劃就有的所有分區（不是某球團自訂的票區），
+// 所以也有沒有數字區號的分區（例：["L3", "左外野", null]），座位數未知時填 null。
 export const DOME_SEAT_MAP_V3_FILE = '大巨蛋座位v3.json';
 
-type SeatMapEntry = [string, number, number];
+type SeatMapEntry = [string, number | string, number | null];
 
 export function loadSeatCapacityMap(fileName: string): Map<string, number> {
   const map = new Map<string, number>();
@@ -19,6 +21,8 @@ export function loadSeatCapacityMap(fileName: string): Map<string, number> {
     const raw = fs.readFileSync(jsonPath, 'utf-8');
     const entries: SeatMapEntry[] = JSON.parse(raw);
     for (const [floor, zoneNum, capacity] of entries) {
+      // 座位數未知（null）的分區不放進容量表，避免回推時被當成 0
+      if (typeof capacity !== 'number') continue;
       map.set(`${floor}-${zoneNum}`, capacity);
     }
     console.log(`Loaded ${map.size} dome seat entries from ${fileName}`);
@@ -74,7 +78,11 @@ export function patchDomeCapacity(details: TicketZone[], capacityMap: Map<string
     if (block.missingIndices.length === 0) continue;
     // 整組只有一列（該分區本來就沒拆前/後）時，就算這一列本身沒有其他列可以比對，
     // 也可以放心直接用整區容量回填，因為不存在「跟另一列重複計算」的風險。
-    const isSoloZone = block.missingIndices.length === 1 && !block.hasRealData;
+    // 但如果這唯一的一列名稱帶「前排／後排」，代表它只是拆分區的一半、另一半根本
+    // 沒列出來（例：味全 2026-10-17 只賣「B1內野104區前排」259 席，沒有後排那列，
+    // v3 的 104 區是整區 724 席），這時回填整區容量會多算，維持未知。
+    const soloName = details[block.missingIndices[0]].zone;
+    const isSoloZone = block.missingIndices.length === 1 && !block.hasRealData && !/前排|後排/.test(soloName);
     if (!block.hasRealData && !isSoloZone) continue;
     const capacity = capacityMap.get(key);
     if (capacity === undefined) continue;
