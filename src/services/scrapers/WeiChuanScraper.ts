@@ -285,79 +285,128 @@ export class WeiChuanScraper implements ITicketScraper {
        }
     });
 
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+    type HotZone = typeof hotZones[number];
+
+    // 讀一區座位圖。回傳 null 代表頁面裡既沒有座位 DOM 也沒有 seatStr，交給呼叫端決定要不要重抓。
+    const readSeatMap = async (tz: HotZone): Promise<{ unsold: number; sold: number } | null> => {
+        const r4 = await fetchHtml(tz.url, this.baseUrl + `UTK0204_?PERFORMANCE_ID=${performanceId}&PRODUCT_ID=${uProductId}`);
+        const $zone = cheerio.load(r4.html);
+
+        let unsold = $zone('.seat-empty').length;
+        let sold = $zone('.seat-people').length;
+        if (unsold > 0 || sold > 0) return { unsold, sold };
+
+        // Fallback: If DOM elements are absent due to client-side rendering, count statuses directly from the matrix payload
+        const seatStrMatch = r4.html.match(/seatStr\s*=\s*'([^']*)'/);
+        if (!seatStrMatch || !seatStrMatch[1]) {
+            // 只記狀態碼、長度、是否為 WAF 頁與頁面標題，方便判斷失敗原因；不記 cookie。
+            const title = $zone('title').text().trim().slice(0, 40);
+            console.log(`[Weichuan] 座位圖讀不到: ${tz.name} status=${r4.status} len=${r4.html.length} waf=${r4.html.includes('網站有異常情況')} title="${title}"`);
+            return null;
+        }
+        unsold = 0;
+        sold = 0;
+        const groups = seatStrMatch[1].split('\t');
+        for (const group of groups) {
+            const parts = group.split(':');
+            if (parts.length >= 3) {
+                const status = parts[1];
+                // Only count if there's actual seat data
+                if (parts[2].trim().length > 0) {
+                    const count = parts[2].split('.').length;
+                    if (status === '0') unsold += count;
+                    // '1' is sold, '3' is CART, '4' is locked. Treat 1, 3, 4 as sold/unavailable.
+                    else if (status === '1' || status === '3' || status === '4') sold += count;
+                }
+            }
+        }
+        return { unsold, sold };
+    };
+
+    const finishZone = (tz: HotZone, result: { unsold: number; sold: number } | null) => {
+        const d = details[tz.index];
+        if (result) {
+            d.unsold = result.unsold;
+            d.sold = result.sold;
+            d.total = result.unsold + result.sold;
+        } else {
+            // 既無 DOM 也無 seatStr：這區實際賣況未知。維持未知（unsold 保留票區表上的數字），
+            // 不要寫 sold=0（會變成看似真實的 0/0，見 DEVLOG 2026-06-26 路徑 3）。
+            d.sold = -1;
+            d.total = -1;
+            d.error = "座位圖解析失敗";
+        }
+        if (d.unsold >= 0) total_unsold += d.unsold;
+    };
+
     if (onProgress) onProgress(`分析座位圖...`);
     const concurrency = 5; // optimized concurrency to speed up fetching and avoid proxy timeouts
+    const failedZones: HotZone[] = [];
+    let wafBlocked = false;
     for (let i = 0; i < hotZones.length; i += concurrency) {
         const batch = hotZones.slice(i, i + concurrency);
         try {
             await Promise.all(batch.map(async (tz) => {
                 if (onProgress) onProgress(`讀取分區: ${tz.name}...`);
-                let retries = 0;
-                let success = false;
-                while (retries < 3 && !success) {
-                    try {
-                       let r4 = await fetchHtml(tz.url, this.baseUrl + `UTK0204_?PERFORMANCE_ID=${performanceId}&PRODUCT_ID=${uProductId}`);
-                       const $zone = cheerio.load(r4.html);
-                       
-                       let unsold = $zone('.seat-empty').length;
-                       let sold = $zone('.seat-people').length;
-                       
-                       if (unsold === 0 && sold === 0) {
-                           // Fallback: If DOM elements are absent due to client-side rendering, count statuses directly from the matrix payload
-                           let seatStrMatch = r4.html.match(/seatStr\s*=\s*'([^']*)'/);
-                           if (seatStrMatch && seatStrMatch[1]) {
-                               const matrix = seatStrMatch[1];
-                               unsold = 0;
-                               sold = 0;
-                               const groups = matrix.split('\t');
-                               for (const group of groups) {
-                                   const parts = group.split(':');
-                                   if (parts.length >= 3) {
-                                       const status = parts[1];
-                                       // Only count if there's actual seat data
-                                       if (parts[2].trim().length > 0) {
-                                           const count = parts[2].split('.').length;
-                                           if (status === '0') unsold += count;
-                                           // '1' is sold, '3' is CART, '4' is locked. Treat 1, 3, 4 as sold/unavailable.
-                                           else if (status === '1' || status === '3' || status === '4') sold += count;
-                                       }
-                                   }
-                               }
-                           } else {
-                               // 既無 DOM 也無 seatStr：這區實際賣況未知。維持未知，
-                               // 不要寫 sold=0（會變成看似真實的 0/0，見 DEVLOG 2026-06-26 路徑 3）。
-                               unsold = details[tz.index].unsold;
-                               sold = -1;
-                               details[tz.index].error = "座位圖解析失敗";
-                           }
-                       }
-                       const total = sold !== -1 ? unsold + sold : -1;
-
-                       if (unsold >= 0) total_unsold += unsold;
-            
-                       details[tz.index].unsold = unsold;
-                       details[tz.index].sold = sold;
-                       details[tz.index].total = total;
-                       success = true;
-                    } catch(e: any) {
-                        console.log(`Zone ${tz.name} encountered WAF block.`);
-                        details[tz.index].error = "遭防爬蟲阻擋(WAF)";
-                        throw new Error("WAF_BLOCKED");
-                    }
+                try {
+                    const result = await readSeatMap(tz);
+                    if (result) finishZone(tz, result);
+                    else failedZones.push(tz);
+                } catch(e: any) {
+                    console.log(`Zone ${tz.name} encountered WAF block.`);
+                    details[tz.index].error = "遭防爬蟲阻擋(WAF)";
+                    throw new Error("WAF_BLOCKED");
                 }
             }));
         } catch (e: any) {
             if (e.message === "WAF_BLOCKED") {
+                wafBlocked = true;
                 break;
             }
             throw e;
         }
-        await new Promise(r => setTimeout(r, 1200)); // sleep to avoid firing too fast
+        await sleep(1200); // sleep to avoid firing too fast
     }
+
+    // 讀不到的分區常常是同一批 5 區一起失敗（2026-10-14 一次就有 B1 131–135、L5 511–515
+    // 各 5 區），比較像站方對同時送出的請求限速，不是座位圖本身有問題。
+    // 所以等一下，改成一區一區、放慢速度重抓，最多兩輪；還是讀不到才標「座位圖解析失敗」。
+    let pending = failedZones;
+    for (let round = 1; round <= 2 && pending.length > 0 && !wafBlocked; round++) {
+        await sleep(2000 * round);
+        const stillFailed: HotZone[] = [];
+        for (const tz of pending) {
+            if (onProgress) onProgress(`重新讀取分區: ${tz.name}（第 ${round} 次）...`);
+            try {
+                const result = await readSeatMap(tz);
+                if (result) finishZone(tz, result);
+                else stillFailed.push(tz);
+            } catch (e: any) {
+                // 重抓時連線出錯不中斷整體結果，這區維持讀不到
+                stillFailed.push(tz);
+            }
+            await sleep(800);
+        }
+        pending = stillFailed;
+    }
+    pending.forEach(tz => finishZone(tz, null));
 
     // 座位圖讀不到的分區（WAF 中斷、完售後連結被拿掉）用 v3 容量表回填 total。
     // 味全只在大巨蛋才有 v3 可用；非大巨蛋分區名稱對不到 v3，patchDomeCapacity 不會動。
     patchDomeCapacity(details, this.domeSeatMap);
+
+    // FamilyZone 自由入座、沒有座位圖，座位數一定是空白。在 CSV 備註寫清楚這區是什麼、
+    // 為什麼不補數字，避免時間久了誤以為是抓取失敗（見 NOTE.md 的 v3 段落）。
+    // 備註會被 CSV 包在雙引號裡，文字裡不要出現半形雙引號。
+    const familyZoneNote = '外野 L3 貴賓樓層的親子專區（沙發座椅＋兒童遊戲區，從 Gate 11 專屬通道搭電梯上樓）。'
+        + '自由入座、沒有座位圖，官方也沒公布席數，所以座位數和已售數留白，不填估計值。'
+        + '剛開賣還沒人買時，未售張數就是這區的總席數。參考上限：維基百科外野 VIP 層 334 席（左右外野合計）。';
+    details.forEach(z => {
+        if (/FamilyZone/i.test(z.zone)) {
+            z.error = z.error ? `${z.error} ${familyZoneNote}` : familyZoneNote;
+        }
+    });
 
     let sum_sold = 0;
     let sum_capacity = 0;
