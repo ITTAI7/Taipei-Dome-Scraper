@@ -31,7 +31,8 @@
 ```
 TAIPEI_DOME_SCRAPER/
 ├── server.ts                      # Express 後端伺服器（port 3000）
-├── start_all.bat                  # 一鍵啟動腳本（server watch 模式 + localtunnel）
+├── start_all.bat                  # 一鍵啟動腳本（server watch 模式，啟動後自動開啟 localhost）
+├── logs/                          # 伺服器紀錄（本機執行時自動產生，保留 14 天，不上傳 GitHub）
 ├── src/
 │   ├── App.tsx                    # React 前端 SPA
 │   ├── main.tsx                   # React 進入點
@@ -60,7 +61,6 @@ TAIPEI_DOME_SCRAPER/
 - **前端**：React 19、TypeScript、Vite、Tailwind CSS、Lucide React、Motion
 - **後端**：Express、tsx（開發模式用 `tsx watch`，存檔自動重啟）
 - **爬蟲**：Cheerio（HTML 解析）、playwright-core + 本機 Chrome（樂天/統一/明星賽繞 Cloudflare 用，遇到驗證需人工點一次）、undici（放寬憑證驗證的 dispatcher，只在偵測到公司網路 TLS 攔截時才啟用）
-- **網路穿透**：localtunnel / ngrok
 
 ## 快速開始
 
@@ -89,7 +89,7 @@ start_all.bat
 此腳本會依序：
 1. 清除殘留的 Node.js 程序
 2. 啟動 Scraper Server（port 3000，watch 模式）
-3. 啟動 Localtunnel 建立公開網址
+3. 等伺服器啟動完成後，用預設瀏覽器開啟 http://localhost:3000（不再建立對外網址）
 
 ## API 端點
 
@@ -114,7 +114,7 @@ start_all.bat
 - 樂天桃猿、統一獅、職棒明星賽使用 ibon，因為有 Cloudflare 防護，先嘗試純 HTTP，失敗才透過 `IbonBrowser.ts` 開啟本機 Chrome 半自動繞過（需要人手動點一次驗證），只能在本機執行；雲端模式（`CLOUD_MODE=true`）下會直接回傳錯誤，不會嘗試啟動瀏覽器。
 - 各隊保有獨立的 `getGames()` 與 `getTickets()` 實作，避免互相干擾。
 
-詳細開發指引請參閱 [AGENTS.md](AGENTS.md)、逐隊實作細節請參閱 [NOTE.md](NOTE.md)、開發過程與踩坑紀錄請參閱 [DEVLOG.md](DEVLOG.md)。
+詳細開發指引請參閱 [AGENTS.md](AGENTS.md)、各版本更新內容請參閱 [CHANGELOG.md](CHANGELOG.md)、逐隊實作細節請參閱 [NOTE.md](NOTE.md)、開發過程與踩坑紀錄請參閱 [DEVLOG.md](DEVLOG.md)。
 
 ## 環境變數
 

@@ -6,6 +6,39 @@ import { fileURLToPath } from 'url';
 import { ScraperFactory } from './src/services/scrapers/ScraperFactory.js';
 import { WeiChuanScraper } from './src/services/scrapers/WeiChuanScraper.js';
 import { localSafeFetch } from './src/services/scrapers/localFetch.js';
+import { format } from 'util';
+
+// 本機執行時，把伺服器紀錄同時寫進 logs/server-YYYY-MM-DD.log（每行前面加時間）。
+// start_all.bat 開的黑色視窗只保留最後幾十行，出問題時要靠這個檔案查完整經過
+// （2026-10-15 味全連線中斷時，視窗裡只剩最後 30 行）。logs/ 已列在 .gitignore；
+// 雲端模式不寫檔。紀錄本來就不含 cookie、密碼（2026-10-07 健檢時已拿掉）。
+function mirrorConsoleToFile() {
+  if (process.env.CLOUD_MODE === 'true') return;
+  const dir = path.join(process.cwd(), 'logs');
+  const KEEP_DAYS = 14;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    // 超過 14 天的舊紀錄刪掉
+    for (const f of fs.readdirSync(dir)) {
+      const full = path.join(dir, f);
+      if (/^server-\d{4}-\d{2}-\d{2}\.log$/.test(f) && Date.now() - fs.statSync(full).mtimeMs > KEEP_DAYS * 86400000) fs.unlinkSync(full);
+    }
+  } catch {}
+  for (const level of ['log', 'warn', 'error'] as const) {
+    const original = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+      original(...args);
+      const d = new Date();
+      const file = path.join(dir, `server-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.log`);
+      const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      // 去掉終端機顏色碼，檔案裡才不會出現亂碼
+      const text = format(...args).replace(/\x1b\[[0-9;]*m/g, '');
+      try { fs.appendFileSync(file, `${time} ${level === 'log' ? '' : `[${level}] `}${text}\n`); } catch {}
+    };
+  }
+}
+mirrorConsoleToFile();
 
 async function startServer() {
   const app = express();

@@ -11,6 +11,7 @@ export default defineConfig({
         '**/browser_data_*',
         '**/debug_*.html',
         '**/*.png',
+        '**/logs/**',
       ],
     },
   },

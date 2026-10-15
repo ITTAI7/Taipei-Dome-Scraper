@@ -3,6 +3,12 @@ import { ITicketScraper, GameLink, TicketInfo, TicketZone } from './ITicketScrap
 import { localSafeFetch } from './localFetch.js';
 import { loadSeatCapacityMap, patchDomeCapacity, DOME_SEAT_MAP_V3_FILE } from './domeSeatMap.js';
 
+// 味全售票網站的限速頁：讀太快會回「429 - 請求頻率過高」（HTTP 狀態碼仍是 200，只能看內容），
+// 偶爾回「網站有異常情況」頁。兩種都是等一下就會恢復，不是頁面結構或登入的問題。
+const isThrottledPage = (html: string) =>
+    html.includes('請求頻率過高') || html.includes('HTTP 429') || html.includes('網站有異常情況');
+const THROTTLED_MESSAGE = '⏳ 味全售票網站暫時限制查詢頻率（429 請求頻率過高），請等 1 分鐘後再查詢。';
+
 export class WeiChuanScraper implements ITicketScraper {
   private baseUrl = 'https://tix.wdragons.com/';
   private domeSeatMap = loadSeatCapacityMap(DOME_SEAT_MAP_V3_FILE);
@@ -145,7 +151,7 @@ export class WeiChuanScraper implements ITicketScraper {
            updateCookies(res.headers.getSetCookie());
        }
        const htmlText = await res.text();
-       return {status: res.status, html: htmlText};
+       return {status: res.status, html: htmlText, location: res.headers.get('location') || ''};
     };
 
     console.log('[Weichuan] Navigating and extracting...');
@@ -176,11 +182,22 @@ export class WeiChuanScraper implements ITicketScraper {
     const pListHtml = await pListRes.text();
     let mPerf = pListHtml.match(/PERFORMANCE_ID=([A-Z0-9]+)/);
     if(!mPerf) {
+        // 一開始就被限速（例如剛查完又馬上再查）：直接說清楚，不要落到下面被當成「找不到 PERFORMANCE_ID」。
+        // 限速判斷都放在「該有的資料找不到」之後才做，避免正常頁面剛好含有那幾個字被誤判。
+        if (isThrottledPage(page1Html.html) || isThrottledPage(pListHtml)) throw new Error(THROTTLED_MESSAGE);
         // 沒有購票連結通常代表這個階段還沒開放一般購票，不是登入失效或被擋。
         // 例：2026-10-07 台灣大賽「狂龍軍會員優先訂購」期間，#buy_btn 是
         // VipSellCheck('...')（要先通過會員資格驗證），而不是 PERFORMANCE_ID 連結；
         // 非會員帳號會被站方回「您不符合該階段優先購買資格」。
         const $pList = cheerio.load(pListHtml);
+        // 站方的登入已失效（伺服器還留著舊 cookie，但味全那邊 session 過期了）時，
+        // 購買鈕是 alert1('請先登入！')，按鈕文字仍是「購買」。這要回報成登入失效
+        // （錯誤字串含 UNAUTHORIZED，server 會回 401，前端會清掉 token 並跳出登入框），
+        // 不能落到下面被誤報成「尚未開放一般購票：購買」。（2026-10-15 實測）
+        if (($pList('#buy_btn').attr('onclick') || '').includes('請先登入')) {
+            WeiChuanScraper.cookieStore.delete(sessionToken);
+            throw new Error("UNAUTHORIZED_SITE_SESSION_EXPIRED");
+        }
         const buyBtnText = $pList('#buy_btn').text().trim();
         if (buyBtnText) {
             throw new Error(`⏳ 此場次目前尚未開放一般購票：${buyBtnText}`);
@@ -192,6 +209,8 @@ export class WeiChuanScraper implements ITicketScraper {
     const r3 = await fetchHtml(`UTK0204_?PERFORMANCE_ID=${performanceId}&PRODUCT_ID=${uProductId}`, this.baseUrl + `UTK0201_?PRODUCT_ID=${uProductId}&STARTDATE=${uStartDate}`);
     
     const $ = cheerio.load(r3.html);
+    // 票區表被限速的話整張表是空的，會變成「0 區」的錯誤結果
+    if ($('tr.saleTr').length === 0 && isThrottledPage(r3.html)) throw new Error(THROTTLED_MESSAGE);
     
     let mapObjUrlMatch = r3.html.match(/imgs2\.utiki\.com\.tw.*?_live\.map/);
     let mapDoc: any = null;
@@ -287,23 +306,28 @@ export class WeiChuanScraper implements ITicketScraper {
 
     const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
     type HotZone = typeof hotZones[number];
+    type SeatMapResult = { kind: 'ok'; unsold: number; sold: number } | { kind: 'throttled' } | { kind: 'empty' };
 
-    // 讀一區座位圖。回傳 null 代表頁面裡既沒有座位 DOM 也沒有 seatStr，交給呼叫端決定要不要重抓。
-    const readSeatMap = async (tz: HotZone): Promise<{ unsold: number; sold: number } | null> => {
+    // 讀一區座位圖。
+    // - throttled：售票網站限速頁（429 / 網站有異常情況），跟座位圖本身無關，冷卻後重讀即可。
+    // - empty：頁面正常，但既沒有座位 DOM 也沒有 seatStr。
+    const readSeatMap = async (tz: HotZone): Promise<SeatMapResult> => {
         const r4 = await fetchHtml(tz.url, this.baseUrl + `UTK0204_?PERFORMANCE_ID=${performanceId}&PRODUCT_ID=${uProductId}`);
         const $zone = cheerio.load(r4.html);
 
         let unsold = $zone('.seat-empty').length;
         let sold = $zone('.seat-people').length;
-        if (unsold > 0 || sold > 0) return { unsold, sold };
+        if (unsold > 0 || sold > 0) return { kind: 'ok', unsold, sold };
 
         // Fallback: If DOM elements are absent due to client-side rendering, count statuses directly from the matrix payload
         const seatStrMatch = r4.html.match(/seatStr\s*=\s*'([^']*)'/);
         if (!seatStrMatch || !seatStrMatch[1]) {
-            // 只記狀態碼、長度、是否為 WAF 頁與頁面標題，方便判斷失敗原因；不記 cookie。
+            // 找不到座位資料時才判斷是不是限速頁（正常座位圖頁就算含有那幾個字也不會誤判）
+            if (isThrottledPage(r4.html)) return { kind: 'throttled' };
+            // 只記狀態碼、長度、頁面標題與轉址目標，方便判斷失敗原因；不記 cookie。
             const title = $zone('title').text().trim().slice(0, 40);
-            console.log(`[Weichuan] 座位圖讀不到: ${tz.name} status=${r4.status} len=${r4.html.length} waf=${r4.html.includes('網站有異常情況')} title="${title}"`);
-            return null;
+            console.log(`[Weichuan] 座位圖讀不到: ${tz.name} status=${r4.status} len=${r4.html.length} title="${title}" location="${r4.location}"`);
+            return { kind: 'empty' };
         }
         unsold = 0;
         sold = 0;
@@ -321,78 +345,121 @@ export class WeiChuanScraper implements ITicketScraper {
                 }
             }
         }
-        return { unsold, sold };
+        return { kind: 'ok', unsold, sold };
     };
 
-    const finishZone = (tz: HotZone, result: { unsold: number; sold: number } | null) => {
+    // result 為 null 時 failNote 說明讀不到的原因（寫進 CSV 備註／分區方塊）
+    const finishZone = (tz: HotZone, result: { unsold: number; sold: number } | null, failNote = "座位圖解析失敗") => {
         const d = details[tz.index];
         if (result) {
             d.unsold = result.unsold;
             d.sold = result.sold;
             d.total = result.unsold + result.sold;
         } else {
-            // 既無 DOM 也無 seatStr：這區實際賣況未知。維持未知（unsold 保留票區表上的數字），
+            // 讀不到座位圖：這區實際賣況未知。維持未知（unsold 保留票區表上的數字），
             // 不要寫 sold=0（會變成看似真實的 0/0，見 DEVLOG 2026-06-26 路徑 3）。
             d.sold = -1;
             d.total = -1;
-            d.error = "座位圖解析失敗";
+            d.error = failNote;
         }
         if (d.unsold >= 0) total_unsold += d.unsold;
     };
 
+    // 讀座位圖：味全售票網站有請求頻率限制。2026-10-15 實測 10/17：5 區同時讀，約 30 秒讀了
+    // 115 區後開始回「429 - 請求頻率過高」頁，剩下 56 區全部被擋（多是輪椅／陪同席、L2 外野）。
+    // 以前把限速頁當成「座位圖讀不到」，固定等 2、4 秒各重抓一次，網站擋得久一點就標失敗。
+    // 現在改成：
+    // - 平常最多 5 區同時讀；一被限速，全部暫停冷卻（5→10→20→30 秒，連續被擋才加長），
+    //   之後改成一次一區、每區間隔 1 秒。
+    // - 被限速的分區放回佇列最前面，冷卻後重讀，不算失敗；讀到開始後 4 分鐘還被擋才放棄。
+    // - 頁面正常但沒有座位資料（empty）的分區排到最後再讀，共讀 3 次還是沒有才標「座位圖解析失敗」。
+    // - 連線被中斷（fetch 丟例外）跟限速一樣冷卻後重讀。以前一丟例外就整個停掉：2026-10-15 實測
+    //   L5 506–510 五區同時連線錯誤，後面還沒讀的分區全部沒數字、也沒備註，已售少算一萬多人。
+    // - 每一區最後不是讀到，就是有備註，不會有沒讀又沒說的分區。
     if (onProgress) onProgress(`分析座位圖...`);
-    const concurrency = 5; // optimized concurrency to speed up fetching and avoid proxy timeouts
-    const failedZones: HotZone[] = [];
-    let wafBlocked = false;
-    for (let i = 0; i < hotZones.length; i += concurrency) {
-        const batch = hotZones.slice(i, i + concurrency);
-        try {
-            await Promise.all(batch.map(async (tz) => {
-                if (onProgress) onProgress(`讀取分區: ${tz.name}...`);
-                try {
-                    const result = await readSeatMap(tz);
-                    if (result) finishZone(tz, result);
-                    else failedZones.push(tz);
-                } catch(e: any) {
-                    console.log(`Zone ${tz.name} encountered WAF block.`);
-                    details[tz.index].error = "遭防爬蟲阻擋(WAF)";
-                    throw new Error("WAF_BLOCKED");
-                }
-            }));
-        } catch (e: any) {
-            if (e.message === "WAF_BLOCKED") {
-                wafBlocked = true;
-                break;
-            }
-            throw e;
-        }
-        await sleep(1200); // sleep to avoid firing too fast
-    }
+    const FAST_CONCURRENCY = 5;
+    const FAST_INTERVAL_MS = 240;   // 兩次請求開始之間的最小間隔（約等於原本 5 區一批、批間 1.2 秒）
+    const SLOW_INTERVAL_MS = 1000;
+    const GIVE_UP_AFTER_MS = 4 * 60 * 1000;
+    const EMPTY_MAX_TRIES = 3;
+    const startedAt = Date.now();
+    const queue: HotZone[] = [...hotZones];
+    const tries = new Map<HotZone, number>();
+    const emptyTries = new Map<HotZone, number>();
+    // 每區最近一次沒讀到是因為限速還是連線中斷，放棄時用來寫備註
+    const lastBlock = new Map<HotZone, 'throttled' | 'connError'>();
+    const BLOCK_NOTE = { throttled: "售票網站持續限速，未讀到座位圖", connError: "連線被售票網站中斷，未讀到座位圖" };
+    const gaveUp: { tz: HotZone; note: string }[] = [];
+    let inFlight = 0;
+    let slowMode = false;
+    let cooldownUntil = 0;
+    let nextStartAt = 0;
+    let throttleStreak = 0;
 
-    // 讀不到的分區常常是同一批 5 區一起失敗（2026-10-14 一次就有 B1 131–135、L5 511–515
-    // 各 5 區），比較像站方對同時送出的請求限速，不是座位圖本身有問題。
-    // 所以等一下，改成一區一區、放慢速度重抓，最多兩輪；還是讀不到才標「座位圖解析失敗」。
-    let pending = failedZones;
-    for (let round = 1; round <= 2 && pending.length > 0 && !wafBlocked; round++) {
-        await sleep(2000 * round);
-        const stillFailed: HotZone[] = [];
-        for (const tz of pending) {
-            if (onProgress) onProgress(`重新讀取分區: ${tz.name}（第 ${round} 次）...`);
+    const worker = async () => {
+        while (true) {
+            const waitMs = Math.max(cooldownUntil, nextStartAt) - Date.now();
+            if (waitMs > 0) { await sleep(waitMs); continue; }
+            if (queue.length === 0) {
+                // 其他區還在讀的話先等：它們被限速時會放回佇列
+                if (inFlight === 0) return;
+                await sleep(200);
+                continue;
+            }
+            if (inFlight >= (slowMode ? 1 : FAST_CONCURRENCY)) { await sleep(100); continue; }
+
+            const tz = queue.shift()!;
+            if (Date.now() - startedAt > GIVE_UP_AFTER_MS) {
+                gaveUp.push({ tz, note: BLOCK_NOTE[lastBlock.get(tz) ?? 'throttled'] });
+                continue;
+            }
+            // 檢查與設定 nextStartAt 之間沒有 await，多個 worker 不會同時通過
+            nextStartAt = Date.now() + (slowMode ? SLOW_INTERVAL_MS : FAST_INTERVAL_MS);
+            const n = (tries.get(tz) ?? 0) + 1;
+            tries.set(tz, n);
+            if (onProgress) onProgress(n === 1 ? `讀取分區: ${tz.name}...` : `重新讀取分區: ${tz.name}（第 ${n} 次）...`);
+
+            inFlight++;
+            let result: SeatMapResult | { kind: 'connError' };
             try {
-                const result = await readSeatMap(tz);
-                if (result) finishZone(tz, result);
-                else stillFailed.push(tz);
+                result = await readSeatMap(tz);
             } catch (e: any) {
-                // 重抓時連線出錯不中斷整體結果，這區維持讀不到
-                stillFailed.push(tz);
+                // 只記錯誤代碼與訊息，不記 cookie
+                console.log(`[Weichuan] 讀取 ${tz.name} 連線錯誤：${e?.cause?.code ?? ''} ${e?.message ?? e}`);
+                result = { kind: 'connError' };
+            } finally {
+                inFlight--;
             }
-            await sleep(800);
-        }
-        pending = stillFailed;
-    }
-    pending.forEach(tz => finishZone(tz, null));
 
-    // 座位圖讀不到的分區（WAF 中斷、完售後連結被拿掉）用 v3 容量表回填 total。
+            if (result.kind === 'ok') {
+                throttleStreak = 0;
+                finishZone(tz, result);
+            } else if (result.kind === 'throttled' || result.kind === 'connError') {
+                lastBlock.set(tz, result.kind);
+                queue.unshift(tz);
+                // 同時在讀的幾區一起被擋，只算一次、只冷卻一次
+                if (Date.now() >= cooldownUntil) {
+                    throttleStreak++;
+                    const coolMs = Math.min(30000, 5000 * 2 ** (throttleStreak - 1));
+                    cooldownUntil = Date.now() + coolMs;
+                    slowMode = true;
+                    // 前端用「限速，等待 N 秒」／「連線中斷，等待 N 秒」這兩種文字顯示提醒框，改字要一起改 App.tsx
+                    const reason = result.kind === 'throttled' ? '暫時限速' : '連線中斷';
+                    console.log(`[Weichuan] 售票網站${reason}，暫停 ${coolMs / 1000} 秒後放慢速度繼續`);
+                    if (onProgress) onProgress(`售票網站${reason}，等待 ${coolMs / 1000} 秒後放慢速度繼續...`);
+                }
+            } else {
+                const m = (emptyTries.get(tz) ?? 0) + 1;
+                emptyTries.set(tz, m);
+                if (m < EMPTY_MAX_TRIES) queue.push(tz);
+                else gaveUp.push({ tz, note: "座位圖解析失敗" });
+            }
+        }
+    };
+    await Promise.all(Array.from({ length: FAST_CONCURRENCY }, () => worker()));
+    gaveUp.forEach(({ tz, note }) => finishZone(tz, null, note));
+
+    // 座位圖讀不到的分區（被限速／連線中斷到放棄、完售後連結被拿掉）用 v3 容量表回填 total。
     // 味全只在大巨蛋才有 v3 可用；非大巨蛋分區名稱對不到 v3，patchDomeCapacity 不會動。
     patchDomeCapacity(details, this.domeSeatMap);
 

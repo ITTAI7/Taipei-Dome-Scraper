@@ -34,3 +34,6 @@ rakuten_error.png
 # 手動編譯產物（專案用 tsx 直接跑 .ts，不需要 .js）
 src/services/scrapers/*.js
 server.js
+
+# 伺服器紀錄（server.ts 本機執行時寫入，保留 14 天）
+logs/
