@@ -118,9 +118,11 @@ export class WeiChuanScraper implements ITicketScraper {
 
     // Simulate cookie jar
     let allCookies = new Map<string, string>();
+    // 只切第一個 '='：cookie 值本身可能含 '='（例如 base64 補位），跟下面 updateCookies() 一致
     cookieStr.split(';').forEach(c => {
-       const [k, v] = c.trim().split('=');
-       if (k && v) allCookies.set(k, v);
+       const pair = c.trim();
+       const sepIdx = pair.indexOf('=');
+       if (sepIdx > 0 && sepIdx < pair.length - 1) allCookies.set(pair.substring(0, sepIdx), pair.substring(sepIdx + 1));
     });
 
     const updateCookies = (cookies: string[]) => {

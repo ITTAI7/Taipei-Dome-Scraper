@@ -32,8 +32,10 @@ export function loadSeatCapacityMap(fileName: string): Map<string, number> {
   return map;
 }
 
+// L3 內野 301–304、314–317 在 v3 有實測座位數（味全 10/17 座位圖），所以樓層要認得 L3，
+// 跟 App.tsx 的 floorOf() 一致。FamilyZone（L3 左/右外野）名稱沒有「數字＋區」，不會被比對到。
 export function extractFloorZone(zoneName: string): { floor: string; zoneNum: number } | null {
-  const floorMatch = zoneName.match(/(B1|L2|L4|L5)/i);
+  const floorMatch = zoneName.match(/(B1|L[2-5])/i);
   const zoneMatch = zoneName.match(/(\d+)\s*區/);
   if (!floorMatch || !zoneMatch) return null;
   return { floor: floorMatch[1].toUpperCase(), zoneNum: parseInt(zoneMatch[1], 10) };

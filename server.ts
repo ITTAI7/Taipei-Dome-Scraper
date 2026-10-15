@@ -181,9 +181,11 @@ async function startServer() {
       if (loginRes.status === 302 || loginRes.status === 301 || text.includes('UTK') || text.includes('location.href') || text.includes('location.reload') || text.includes('GoBack') || !text.includes('alert')) {
          // Update cookies with new session details
          let allCookies = new Map<string, string>();
+         // 只切第一個 '='：cookie 值本身可能含 '='（例如 base64 補位）
          cookieStr.split(';').forEach(c => {
-             const [k, v] = c.trim().split('=');
-             if (k && v) allCookies.set(k, v);
+             const pair = c.trim();
+             const sepIdx = pair.indexOf('=');
+             if (sepIdx > 0 && sepIdx < pair.length - 1) allCookies.set(pair.substring(0, sepIdx), pair.substring(sepIdx + 1));
          });
          newCookies.forEach(c => {
              let pair = c.split(';')[0];

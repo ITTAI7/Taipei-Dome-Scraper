@@ -469,8 +469,8 @@ export default function App() {
     const link = document.createElement("a");
     link.href = encodedUri;
     
-    const game = currentGamesForTeam.find(g => g.link === selectedGame);
-    const safeTitle = (game?.title || "賽事").replace(/\s|:|vs/g, '_');
+    // 用查詢當時的場次名稱：查完後下拉選單換了場次，檔名才不會變成另一場
+    const safeTitle = (resultMeta?.title || "賽事").replace(/\s|:|vs/g, '_');
     link.download = activeTeam === 'tsg' ? `未售票明細_${safeTitle}.csv` : `售票明細_${safeTitle}.csv`;
     
     document.body.appendChild(link);
@@ -597,7 +597,7 @@ export default function App() {
         {/* Header */}
         <header className={`p-4 sticky top-0 z-10 flex items-center justify-center gap-2 transition-colors ${activeTeam === 'brothers' ? 'bg-yellow-400 border-b border-yellow-500' : activeTeam === 'weichuan' ? 'bg-red-600 outline-none border-b border-red-700' : activeTeam === 'tsg' ? 'bg-[#00604A] border-b border-[#004A3A]' : activeTeam === 'rakuten' ? 'bg-[#BE1E2D] border-b border-[#9E1824]' : activeTeam === 'uni' ? 'bg-[#EC6A1A] border-b border-[#C55A16]' : activeTeam === 'allstar' ? 'bg-[#D4AF37] border-b border-[#B8960F]' : 'bg-[#004A9C] border-b border-[#003875]'}`}>
           <Ticket className={`w-6 h-6 ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`} />
-          <h1 className={`text-xl font-bold tracking-tight ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`}>大巨蛋售票極速查詢 v0.93</h1>
+          <h1 className={`text-xl font-bold tracking-tight ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`}>大巨蛋售票極速查詢 v0.94</h1>
         </header>
         
         {/* Main Content */}
