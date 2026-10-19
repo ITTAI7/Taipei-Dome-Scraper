@@ -339,6 +339,8 @@ export class BrothersScraper implements ITicketScraper {
     // 連線被切斷（ECONNRESET），舊寫法整個停掉，後面 16 區沒讀也沒備註。照味全 2026-10-15 的做法改成：
     // - 平常最多 5 區同時讀；一被限速或連線中斷，全部暫停冷卻（5→10→20→30 秒，連續被擋才加長），
     //   之後改成一次一區、每區間隔 1 秒。
+    // - 慢速連續讀成功 20 區就恢復原本速度（2026-10-19 實測 10/20：才讀 13 區就斷線一次，之後再也沒被擋，
+    //   但剩下 154 區全部慢速讀，花了 213 秒）。恢復後又被擋就再放慢，這次查詢不再加速，避免來回跳。
     // - 被擋的分區放回佇列最前面，冷卻後重讀，不算失敗；讀到開始後 4 分鐘還被擋才放棄並寫備註。
     // - 頁面正常但沒有座位資料（empty）的分區排到最後再讀，共讀 3 次還是沒有才標「座位圖解析失敗」。
     // - 每一區最後不是讀到，就是有備註，不會有沒讀又沒說的分區。
@@ -362,6 +364,9 @@ export class BrothersScraper implements ITicketScraper {
     let cooldownUntil = 0;
     let nextStartAt = 0;
     let throttleStreak = 0;
+    const RECOVER_AFTER_OK = 20;
+    let slowOkStreak = 0;       // 慢速時連續讀成功幾區
+    let recoveredOnce = false;  // 這次查詢已經恢復過一次速度
 
     const worker = async () => {
         while (true) {
@@ -401,7 +406,15 @@ export class BrothersScraper implements ITicketScraper {
             if (result.kind === 'ok') {
                 throttleStreak = 0;
                 finishZone(tz, result);
+                if (slowMode && !recoveredOnce && ++slowOkStreak >= RECOVER_AFTER_OK) {
+                    slowMode = false;
+                    recoveredOnce = true;
+                    // 前端看到「恢復原本速度」就收起限速提醒框，改字要一起改 App.tsx
+                    console.log(`[Brothers] 慢速連續讀成功 ${RECOVER_AFTER_OK} 區，恢復原本速度`);
+                    if (onProgress) onProgress(`售票網站已恢復，恢復原本速度繼續讀取...`);
+                }
             } else if (result.kind === 'throttled' || result.kind === 'connError') {
+                slowOkStreak = 0;
                 lastBlock.set(tz, result.kind);
                 queue.unshift(tz);
                 // 同時在讀的幾區一起被擋，只算一次、只冷卻一次

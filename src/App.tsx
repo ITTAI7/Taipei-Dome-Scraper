@@ -149,14 +149,18 @@ export default function App() {
   const [queryingTitle, setQueryingTitle] = useState('');
   const [error, setError] = useState('');
 
-  // 進度區的狀況提醒：找最後一則狀況訊息；非 sticky 的狀況在之後出現一般訊息時視為已恢復
+  // 進度區的狀況提醒：找最後一則狀況訊息；非 sticky 的狀況在之後出現一般訊息時視為已恢復。
+  // 兄弟、味全慢速連續讀成功一陣子會送「恢復原本速度」，限速提醒就收起來；
+  // recovered 表示這次查詢已經恢復過一次，再被擋就會慢到結束（爬蟲那邊不會再加速）。
   const activeAlert = (() => {
     if (!loadingTickets) return null;
     for (let i = scrapingProgress.length - 1; i >= 0; i--) {
+      if (scrapingProgress[i].text.includes('恢復原本速度')) return null;
       const c = classifyProgress(scrapingProgress[i].text);
       if (!c) continue;
       if (!c.sticky && i < scrapingProgress.length - 1) return null;
-      return { ...c, at: scrapingProgress[i].at };
+      const recovered = scrapingProgress.slice(0, i).some(m => m.text.includes('恢復原本速度'));
+      return { ...c, recovered, at: scrapingProgress[i].at };
     }
     return null;
   })();
@@ -541,7 +545,9 @@ export default function App() {
         title: activeAlert.connReset ? '售票網站連線中斷' : '售票網站暫時限速',
         body: cooldownLeft > 0
           ? `${activeAlert.connReset ? '網站中斷了連線' : '網站嫌讀取太快'}，已自動暫停，約 ${cooldownLeft} 秒後放慢速度繼續。被擋的分區會重新讀取，查詢會比較久，請稍候。`
-          : '已放慢速度，一次讀一區；被擋的分區會重新讀取，查詢會比較久，請稍候。',
+          : activeAlert.recovered
+            ? '已放慢速度，一次讀一區；這次查詢會維持慢速讀到結束，請稍候。'
+            : '已放慢速度，一次讀一區；被擋的分區會重新讀取，順利讀一陣子後會自動恢復原本速度。',
       } : activeAlert.kind === 'retry' ? {
         title: '售票網站回應異常',
         body: `網站回「系統攔截」，正在自動重試${activeAlert.attempt ? `（第 ${activeAlert.attempt} 次）` : ''}，請稍候。`,
@@ -597,7 +603,7 @@ export default function App() {
         {/* Header */}
         <header className={`p-4 sticky top-0 z-10 flex items-center justify-center gap-2 transition-colors ${activeTeam === 'brothers' ? 'bg-yellow-400 border-b border-yellow-500' : activeTeam === 'weichuan' ? 'bg-red-600 outline-none border-b border-red-700' : activeTeam === 'tsg' ? 'bg-[#00604A] border-b border-[#004A3A]' : activeTeam === 'rakuten' ? 'bg-[#BE1E2D] border-b border-[#9E1824]' : activeTeam === 'uni' ? 'bg-[#EC6A1A] border-b border-[#C55A16]' : activeTeam === 'allstar' ? 'bg-[#D4AF37] border-b border-[#B8960F]' : 'bg-[#004A9C] border-b border-[#003875]'}`}>
           <Ticket className={`w-6 h-6 ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`} />
-          <h1 className={`text-xl font-bold tracking-tight ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`}>大巨蛋售票極速查詢 v0.95</h1>
+          <h1 className={`text-xl font-bold tracking-tight ${activeTeam === 'brothers' ? 'text-gray-900' : 'text-white'}`}>大巨蛋售票極速查詢 v0.96</h1>
         </header>
         
         {/* Main Content */}

@@ -373,6 +373,8 @@ export class WeiChuanScraper implements ITicketScraper {
     // 現在改成：
     // - 平常最多 5 區同時讀；一被限速，全部暫停冷卻（5→10→20→30 秒，連續被擋才加長），
     //   之後改成一次一區、每區間隔 1 秒。
+    // - 慢速連續讀成功 20 區就恢復原本速度（2026-10-19：兄弟實測一開始只斷線一次，剩下 154 區
+    //   全部慢速讀，花了 213 秒）。恢復後又被擋就再放慢，這次查詢不再加速，避免來回跳。兄弟同樣規則。
     // - 被限速的分區放回佇列最前面，冷卻後重讀，不算失敗；讀到開始後 4 分鐘還被擋才放棄。
     // - 頁面正常但沒有座位資料（empty）的分區排到最後再讀，共讀 3 次還是沒有才標「座位圖解析失敗」。
     // - 連線被中斷（fetch 丟例外）跟限速一樣冷卻後重讀。以前一丟例外就整個停掉：2026-10-15 實測
@@ -397,6 +399,9 @@ export class WeiChuanScraper implements ITicketScraper {
     let cooldownUntil = 0;
     let nextStartAt = 0;
     let throttleStreak = 0;
+    const RECOVER_AFTER_OK = 20;
+    let slowOkStreak = 0;       // 慢速時連續讀成功幾區
+    let recoveredOnce = false;  // 這次查詢已經恢復過一次速度
 
     const worker = async () => {
         while (true) {
@@ -436,7 +441,15 @@ export class WeiChuanScraper implements ITicketScraper {
             if (result.kind === 'ok') {
                 throttleStreak = 0;
                 finishZone(tz, result);
+                if (slowMode && !recoveredOnce && ++slowOkStreak >= RECOVER_AFTER_OK) {
+                    slowMode = false;
+                    recoveredOnce = true;
+                    // 前端看到「恢復原本速度」就收起限速提醒框，改字要一起改 App.tsx
+                    console.log(`[Weichuan] 慢速連續讀成功 ${RECOVER_AFTER_OK} 區，恢復原本速度`);
+                    if (onProgress) onProgress(`售票網站已恢復，恢復原本速度繼續讀取...`);
+                }
             } else if (result.kind === 'throttled' || result.kind === 'connError') {
+                slowOkStreak = 0;
                 lastBlock.set(tz, result.kind);
                 queue.unshift(tz);
                 // 同時在讀的幾區一起被擋，只算一次、只冷卻一次
