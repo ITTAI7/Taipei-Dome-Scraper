@@ -3,6 +3,12 @@ import * as cheerio from 'cheerio';
 import { localSafeFetch } from './localFetch.js';
 import { loadSeatCapacityMap, patchDomeCapacity, DOME_SEAT_MAP_V3_FILE } from './domeSeatMap.js';
 
+// 兄弟售票網站的限速頁：讀太快會回「429 - 請求頻率過高」（HTTP 狀態碼仍是 200，只能看內容），
+// 偶爾回「網站有異常情況」頁。2026-10-19 實測 10/20：讀到第 120 區左右開始回 429 頁（跟味全同一頁，1126 bytes）。
+const isThrottledPage = (html: string) =>
+    html.includes('請求頻率過高') || html.includes('HTTP 429') || html.includes('網站有異常情況');
+const THROTTLED_MESSAGE = '⏳ 中信兄弟售票網站暫時限制查詢頻率（429 請求頻率過高），請等 1 分鐘後再查詢。';
+
 export class BrothersScraper implements ITicketScraper {
   private baseUrl = 'https://tix.ctbcsports.com/BROTHERS/';
   private domeSeatMap = loadSeatCapacityMap(DOME_SEAT_MAP_V3_FILE);
@@ -83,7 +89,9 @@ export class BrothersScraper implements ITicketScraper {
     let reqVer = '';
     let auth = '';
 
-    const fetchHtml = async (url: string, referer: string | null = null, asAjax: boolean = false) => {
+    // retryOnWaf：遇到「網站有異常情況」頁時自己等 2 秒重試。讀座位圖時傳 false，
+    // 改由下面的讀取佇列統一冷卻、放慢（不然一個請求自己重試時，其他請求還在全速讀）。
+    const fetchHtml = async (url: string, referer: string | null = null, asAjax: boolean = false, retryOnWaf: boolean = true) => {
        const cookieStr = Array.from(allCookies.entries()).map(([k,v])=>`${k}=${v}`).join('; ');
        let opts: any = { 
            headers: { 
@@ -114,7 +122,7 @@ export class BrothersScraper implements ITicketScraper {
                });
            }
            const htmlText = await res.text();
-           if (htmlText.includes('網站有異常情況')) {
+           if (retryOnWaf && htmlText.includes('網站有異常情況')) {
                retries++;
                if (onProgress) onProgress(`系統攔截... 自動重試中 (${retries}/5)...`);
                await new Promise(r => setTimeout(r, 2000));
@@ -150,6 +158,9 @@ export class BrothersScraper implements ITicketScraper {
     }
     let mPerf = pListHtml.match(/PERFORMANCE_ID=([A-Z0-9]+)/);
     if(!mPerf) {
+        // 一開始就被限速（例如剛查完又馬上再查）：直接說清楚，不要落到下面被當成「找不到 PERFORMANCE_ID」。
+        // 限速判斷都放在「該有的資料找不到」之後才做，避免正常頁面剛好含有那幾個字被誤判。
+        if (isThrottledPage(pListHtml)) throw new Error(THROTTLED_MESSAGE);
         // No purchase link yet usually means the game hasn't gone on sale
         // (e.g. season-ticket priority window not open), not a WAF block.
         const $pList = cheerio.load(pListHtml);
@@ -164,8 +175,10 @@ export class BrothersScraper implements ITicketScraper {
     console.log("Got PERFORMANCE_ID:", performanceId);
 
     const r3 = await fetchHtml(`UTK0204_?PERFORMANCE_ID=${performanceId}&PRODUCT_ID=${uProductId}`, this.baseUrl + `UTK0201_?PRODUCT_ID=${uProductId}&STARTDATE=${uStartDate}`);
-    
+
     const $ = cheerio.load(r3.html);
+    // 票區表被限速的話整張表是空的，會變成「0 區」的錯誤結果
+    if ($('tr.saleTr').length === 0 && isThrottledPage(r3.html)) throw new Error(THROTTLED_MESSAGE);
 
     
     let mapObjUrlMatch = r3.html.match(/imgs2\.utiki\.com\.tw.*?_live\.map/);
@@ -264,82 +277,154 @@ export class BrothersScraper implements ITicketScraper {
        }
     });
     
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+    type HotZone = typeof hotZones[number];
+    type SeatMapResult = { kind: 'ok'; unsold: number; sold: number } | { kind: 'throttled' } | { kind: 'empty' };
+
+    // 讀一區座位圖。
+    // - throttled：售票網站限速頁（429 / 網站有異常情況），跟座位圖本身無關，冷卻後重讀即可。
+    // - empty：頁面正常，但既沒有座位 DOM 也沒有 seatStr。
+    const readSeatMap = async (tz: HotZone): Promise<SeatMapResult> => {
+        const r4 = await fetchHtml(tz.url, this.baseUrl + `UTK0204_?PERFORMANCE_ID=${performanceId}&PRODUCT_ID=${uProductId}`, false, false);
+        const $zone = cheerio.load(r4.html);
+
+        let unsold = $zone('.seat-empty').length;
+        let sold = $zone('.seat-people').length;
+        if (unsold > 0 || sold > 0) return { kind: 'ok', unsold, sold };
+
+        // Fallback: If DOM elements are absent due to client-side rendering, count statuses directly from the matrix payload
+        const seatStrMatch = r4.html.match(/seatStr\s*=\s*'([^']*)'/);
+        if (!seatStrMatch || !seatStrMatch[1]) {
+            // 找不到座位資料時才判斷是不是限速頁（正常座位圖頁就算含有那幾個字也不會誤判）
+            if (isThrottledPage(r4.html)) return { kind: 'throttled' };
+            // 讀不到時記下原因（狀態碼、長度、標題），方便判斷；不記 cookie
+            const title = $zone('title').text().trim().slice(0, 40);
+            console.log(`[Brothers] 座位圖讀不到: ${tz.name} status=${r4.status} len=${r4.html.length} title="${title}"`);
+            return { kind: 'empty' };
+        }
+        unsold = 0;
+        sold = 0;
+        for (const group of seatStrMatch[1].split('\t')) {
+            const parts = group.split(':');
+            // Only count if there's actual seat data
+            if (parts.length >= 3 && parts[2].trim().length > 0) {
+                const count = parts[2].split('.').length;
+                if (parts[1] === '0') unsold += count;
+                // '1' is sold, '3' is CART, '4' is locked. Treat 1, 3, 4 as sold/unavailable.
+                else if (parts[1] === '1' || parts[1] === '3' || parts[1] === '4') sold += count;
+            }
+        }
+        return { kind: 'ok', unsold, sold };
+    };
+
+    // result 為 null 時 failNote 說明讀不到的原因（寫進 CSV 備註／分區方塊）
+    const finishZone = (tz: HotZone, result: { unsold: number; sold: number } | null, failNote = "座位圖解析失敗") => {
+        const d = details[tz.index];
+        if (result) {
+            d.unsold = result.unsold;
+            d.sold = result.sold;
+            d.total = result.unsold + result.sold;
+        } else {
+            // 讀不到座位圖：這區實際賣況未知。維持未知（unsold 保留票區表上的數字），
+            // 不要寫 sold=0（會變成看似真實的 0/0，見 DEVLOG 2026-06-26 路徑 3）。
+            d.sold = -1;
+            d.total = -1;
+            d.error = failNote;
+        }
+        if (d.unsold >= 0) total_unsold += d.unsold;
+    };
+
+    // 讀座位圖：兄弟售票網站有請求頻率限制。2026-10-19 實測 10/20：5 區一批同時讀，讀到第 120 區左右
+    // 開始回「429 - 請求頻率過高」頁，舊寫法不重試，36 區直接標「座位圖解析失敗」；接著 L4 412 區
+    // 連線被切斷（ECONNRESET），舊寫法整個停掉，後面 16 區沒讀也沒備註。照味全 2026-10-15 的做法改成：
+    // - 平常最多 5 區同時讀；一被限速或連線中斷，全部暫停冷卻（5→10→20→30 秒，連續被擋才加長），
+    //   之後改成一次一區、每區間隔 1 秒。
+    // - 被擋的分區放回佇列最前面，冷卻後重讀，不算失敗；讀到開始後 4 分鐘還被擋才放棄並寫備註。
+    // - 頁面正常但沒有座位資料（empty）的分區排到最後再讀，共讀 3 次還是沒有才標「座位圖解析失敗」。
+    // - 每一區最後不是讀到，就是有備註，不會有沒讀又沒說的分區。
     if (onProgress) onProgress(`分析座位圖...`);
     console.log(`Explicit unsold: ${total_unsold}. Fetching ${hotZones.length} hot zones...`);
-    const concurrency = 5; // optimized concurrency to speed up fetching and avoid proxy timeouts
-    for (let i = 0; i < hotZones.length; i += concurrency) {
-        const batch = hotZones.slice(i, i + concurrency);
-        try {
-            await Promise.all(batch.map(async (tz) => {
-                if (onProgress) onProgress(`讀取分區: ${tz.name}...`);
-                let retries = 0;
-                let success = false;
-                while (retries < 3 && !success) {
-                    try {
-                       let r4 = await fetchHtml(tz.url, this.baseUrl + `UTK0204_?PERFORMANCE_ID=${performanceId}&PRODUCT_ID=${uProductId}`);
-                       const $zone = cheerio.load(r4.html);
-                       
-                       let unsold = $zone('.seat-empty').length;
-                       let sold = $zone('.seat-people').length;
-                        
-                       if (unsold === 0 && sold === 0) {
-                           // Fallback: If DOM elements are absent due to client-side rendering, count statuses directly from the matrix payload
-                           let seatStrMatch = r4.html.match(/seatStr\s*=\s*'([^']*)'/);
-                           if (seatStrMatch && seatStrMatch[1]) {
-                               const matrix = seatStrMatch[1];
-                               unsold = 0;
-                               sold = 0;
-                               const groups = matrix.split('\t');
-                               for (const group of groups) {
-                                   const parts = group.split(':');
-                                   if (parts.length >= 3) {
-                                       const status = parts[1];
-                                       // Only count if there's actual seat data
-                                       if (parts[2].trim().length > 0) {
-                                           const count = parts[2].split('.').length;
-                                           if (status === '0') unsold += count;
-                                           // '1' is sold, '3' is CART, '4' is locked. Treat 1, 3, 4 as sold/unavailable.
-                                           else if (status === '1' || status === '3' || status === '4') sold += count;
-                                       }
-                                   }
-                               }
-                           } else {
-                               // 既無 DOM 也無 seatStr：這區實際賣況未知。維持未知，
-                               // 不要寫 sold=0（會變成看似真實的 0/0，見 DEVLOG 2026-06-26 路徑 3）。
-                               unsold = details[tz.index].unsold;
-                               sold = -1;
-                               details[tz.index].error = "座位圖解析失敗";
-                           }
-                       }
-                       const total = sold !== -1 ? unsold + sold : -1;
+    const FAST_CONCURRENCY = 5;
+    const FAST_INTERVAL_MS = 240;   // 兩次請求開始之間的最小間隔（約等於原本 5 區一批、批間 1.2 秒）
+    const SLOW_INTERVAL_MS = 1000;
+    const GIVE_UP_AFTER_MS = 4 * 60 * 1000;
+    const EMPTY_MAX_TRIES = 3;
+    const startedAt = Date.now();
+    const queue: HotZone[] = [...hotZones];
+    const tries = new Map<HotZone, number>();
+    const emptyTries = new Map<HotZone, number>();
+    // 每區最近一次沒讀到是因為限速還是連線中斷，放棄時用來寫備註
+    const lastBlock = new Map<HotZone, 'throttled' | 'connError'>();
+    const BLOCK_NOTE = { throttled: "售票網站持續限速，未讀到座位圖", connError: "連線被售票網站中斷，未讀到座位圖" };
+    const gaveUp: { tz: HotZone; note: string }[] = [];
+    let inFlight = 0;
+    let slowMode = false;
+    let cooldownUntil = 0;
+    let nextStartAt = 0;
+    let throttleStreak = 0;
 
-                       if (unsold >= 0) total_unsold += unsold;
-
-                       details[tz.index].unsold = unsold;
-                       details[tz.index].sold = sold;
-                       details[tz.index].total = total;
-                       success = true;
-                    } catch(e: any) {
-                       if (e.message && e.message.includes('售票系統異常') && retries < 2) {
-                           retries++;
-                           console.log(`Retrying hot zone ${tz.name} (attempt ${retries + 1})...`);
-                           await new Promise(r => setTimeout(r, 2000));
-                       } else {
-                           console.log(`Zone ${tz.name} encountered WAF block.`);
-                           details[tz.index].error = "遭防爬蟲阻擋(WAF)";
-                           throw new Error("WAF_BLOCKED");
-                       }
-                    }
-                }
-            }));
-        } catch (e: any) {
-            if (e.message === "WAF_BLOCKED") {
-                break;
+    const worker = async () => {
+        while (true) {
+            const waitMs = Math.max(cooldownUntil, nextStartAt) - Date.now();
+            if (waitMs > 0) { await sleep(waitMs); continue; }
+            if (queue.length === 0) {
+                // 其他區還在讀的話先等：它們被限速時會放回佇列
+                if (inFlight === 0) return;
+                await sleep(200);
+                continue;
             }
-            throw e;
+            if (inFlight >= (slowMode ? 1 : FAST_CONCURRENCY)) { await sleep(100); continue; }
+
+            const tz = queue.shift()!;
+            if (Date.now() - startedAt > GIVE_UP_AFTER_MS) {
+                gaveUp.push({ tz, note: BLOCK_NOTE[lastBlock.get(tz) ?? 'throttled'] });
+                continue;
+            }
+            // 檢查與設定 nextStartAt 之間沒有 await，多個 worker 不會同時通過
+            nextStartAt = Date.now() + (slowMode ? SLOW_INTERVAL_MS : FAST_INTERVAL_MS);
+            const n = (tries.get(tz) ?? 0) + 1;
+            tries.set(tz, n);
+            if (onProgress) onProgress(n === 1 ? `讀取分區: ${tz.name}...` : `重新讀取分區: ${tz.name}（第 ${n} 次）...`);
+
+            inFlight++;
+            let result: SeatMapResult | { kind: 'connError' };
+            try {
+                result = await readSeatMap(tz);
+            } catch (e: any) {
+                // 只記錯誤代碼與訊息，不記 cookie
+                console.log(`[Brothers] 讀取 ${tz.name} 連線錯誤：${e?.cause?.code ?? ''} ${e?.message ?? e}`);
+                result = { kind: 'connError' };
+            } finally {
+                inFlight--;
+            }
+
+            if (result.kind === 'ok') {
+                throttleStreak = 0;
+                finishZone(tz, result);
+            } else if (result.kind === 'throttled' || result.kind === 'connError') {
+                lastBlock.set(tz, result.kind);
+                queue.unshift(tz);
+                // 同時在讀的幾區一起被擋，只算一次、只冷卻一次
+                if (Date.now() >= cooldownUntil) {
+                    throttleStreak++;
+                    const coolMs = Math.min(30000, 5000 * 2 ** (throttleStreak - 1));
+                    cooldownUntil = Date.now() + coolMs;
+                    slowMode = true;
+                    // 前端用「限速，等待 N 秒」／「連線中斷，等待 N 秒」這兩種文字顯示提醒框，改字要一起改 App.tsx
+                    const reason = result.kind === 'throttled' ? '暫時限速' : '連線中斷';
+                    console.log(`[Brothers] 售票網站${reason}，暫停 ${coolMs / 1000} 秒後放慢速度繼續`);
+                    if (onProgress) onProgress(`售票網站${reason}，等待 ${coolMs / 1000} 秒後放慢速度繼續...`);
+                }
+            } else {
+                const m = (emptyTries.get(tz) ?? 0) + 1;
+                emptyTries.set(tz, m);
+                if (m < EMPTY_MAX_TRIES) queue.push(tz);
+                else gaveUp.push({ tz, note: "座位圖解析失敗" });
+            }
         }
-        await new Promise(r => setTimeout(r, 1200)); // sleep to avoid firing too fast
-    }
+    };
+    await Promise.all(Array.from({ length: FAST_CONCURRENCY }, () => worker()));
+    gaveUp.forEach(({ tz, note }) => finishZone(tz, null, note));
     
     patchDomeCapacity(details, this.domeSeatMap);
 
